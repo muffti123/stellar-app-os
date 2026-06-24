@@ -3,6 +3,7 @@ import exifr from 'exifr';
 import { getDistance } from '@/lib/geo/distance';
 import { uploadImageToS3 } from '@/lib/aws/s3';
 import { encryptGpsCoordinates } from '@/lib/zk/locationProof';
+import { sendPhotoUploadedEmail } from '@/lib/email/sendgrid';
 
 // Maximum allowable distance (in meters) between Exif GPS and farmer-submitted GPS.
 const MAX_DISTANCE_METERS = 500;
@@ -14,6 +15,9 @@ export async function POST(request: Request) {
     const latStr = formData.get('lat') as string | null;
     const lonStr = formData.get('lon') as string | null;
     const farmerId = formData.get('farmerId') as string | null;
+    const treeId = formData.get('treeId') as string | null;
+    const sponsorEmail = formData.get('sponsorEmail') as string | null;
+    const sponsorName = formData.get('sponsorName') as string | null;
 
     if (!photo || !latStr || !lonStr || !farmerId) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
@@ -60,6 +64,15 @@ export async function POST(request: Request) {
 
     // Encrypt EXIF GPS coordinates for privacy
     const encryptedGps = await encryptGpsCoordinates({ lat: exifLat, lon: exifLon });
+
+    // Notify sponsor if contact info provided
+    if (sponsorEmail && sponsorName && treeId) {
+      const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? '';
+      const photoUrl = `${appUrl}/api/planting/photo/${s3Key}`;
+      await sendPhotoUploadedEmail({ sponsorEmail, sponsorName, treeId, photoUrl }).catch((err) =>
+        console.error('[planting/photo] email error:', err)
+      );
+    }
 
     return NextResponse.json(
       {
