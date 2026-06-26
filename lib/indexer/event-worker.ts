@@ -76,13 +76,13 @@ async function pollContractEvents(): Promise<void> {
 
   const filter: SorobanRpc.Api.EventFilter = {
     type: 'contract',
-    ...(CONTRACT_IDS.length > 0 && { contractIds: CONTRACT_IDS }),
+    ...(CONTRACT_IDS.length > 0 ? { contractIds: CONTRACT_IDS } : {}),
   };
 
   const request: SorobanRpc.Api.GetEventsRequest = {
     filters: [filter],
     limit: MAX_EVENTS_PER_POLL,
-    ...(startLedger > 0 && { startLedger }),
+    ...(startLedger > 0 ? { startLedger } : {}),
   };
 
   const response = await server.getEvents(request);
