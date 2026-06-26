@@ -171,6 +171,8 @@ impl NairaPayout {
             }
         }
 
+        contract_utils::assert_whitelisted(&env, &token);
+
         let anchor: Address = env
             .storage()
             .instance()
@@ -303,6 +305,30 @@ impl NairaPayout {
             .expect("contract not initialized");
         admin.require_auth();
     }
+
+    // ── Whitelist management ──────────────────────────────────────────────────
+
+    /// Add `addr` to the contract whitelist. Restricted to admin.
+    pub fn add_to_whitelist(env: Env, addr: Address) {
+        Self::require_admin(&env);
+        contract_utils::add_to_whitelist(&env, &addr);
+    }
+
+    /// Remove `addr` from the contract whitelist. Restricted to admin.
+    pub fn remove_from_whitelist(env: Env, addr: Address) {
+        Self::require_admin(&env);
+        contract_utils::remove_from_whitelist(&env, &addr);
+    }
+
+    /// Returns `true` if `addr` is whitelisted.
+    pub fn is_whitelisted(env: Env, addr: Address) -> bool {
+        contract_utils::is_whitelisted(&env, &addr)
+    }
+
+    /// Panics if `addr` is not whitelisted.
+    pub fn assert_whitelisted(env: Env, addr: Address) {
+        contract_utils::assert_whitelisted(&env, &addr);
+    }
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -344,6 +370,7 @@ mod tests {
         token::StellarAssetClient::new(&env, &token_id).mint(&funder, &100_000);
 
         client.initialize(&admin, &anchor, &0, &1_000_000_000);
+        client.add_to_whitelist(&token_id);
 
         Ctx {
             env,

@@ -150,6 +150,35 @@ impl AdminControls {
             .expect("not initialized")
     }
 
+    // ── Whitelist management ──────────────────────────────────────────────────
+
+    /// Add `addr` to the contract whitelist. Restricted to admin multi-sig.
+    /// Whitelisted addresses are allowed as targets for cross-contract calls.
+    pub fn add_to_whitelist(env: Env, addr: Address) {
+        Self::require_admin(&env);
+        contract_utils::add_to_whitelist(&env, &addr);
+        env.events()
+            .publish((symbol_short!("WLAdd"),), addr);
+    }
+
+    /// Remove `addr` from the contract whitelist. Restricted to admin multi-sig.
+    pub fn remove_from_whitelist(env: Env, addr: Address) {
+        Self::require_admin(&env);
+        contract_utils::remove_from_whitelist(&env, &addr);
+        env.events()
+            .publish((symbol_short!("WLRemove"),), addr);
+    }
+
+    /// Returns `true` if `addr` is whitelisted.
+    pub fn is_whitelisted(env: Env, addr: Address) -> bool {
+        contract_utils::is_whitelisted(&env, &addr)
+    }
+
+    /// Panics if `addr` is not whitelisted.
+    pub fn assert_whitelisted(env: Env, addr: Address) {
+        contract_utils::assert_whitelisted(&env, &addr);
+    }
+
     // ── Admin rotation (two-step) ─────────────────────────────────────────────
 
     /// Step 1 — Current admin proposes a new admin address.
@@ -351,5 +380,71 @@ mod tests {
     fn test_double_initialize_rejected() {
         let (env, admin, oracle, client) = setup();
         client.initialize(&admin, &oracle);
+    }
+
+    // ── Whitelist tests ───────────────────────────────────────────────────────
+
+    #[test]
+    fn test_add_to_whitelist() {
+        let (env, _, _, client) = setup();
+        let allowed = Address::generate(&env);
+        assert!(!client.is_whitelisted(&allowed));
+        client.add_to_whitelist(&allowed);
+        assert!(client.is_whitelisted(&allowed));
+    }
+
+    #[test]
+    fn test_remove_from_whitelist() {
+        let (env, _, _, client) = setup();
+        let allowed = Address::generate(&env);
+        client.add_to_whitelist(&allowed);
+        assert!(client.is_whitelisted(&allowed));
+        client.remove_from_whitelist(&allowed);
+        assert!(!client.is_whitelisted(&allowed));
+    }
+
+    #[test]
+    fn test_is_whitelisted_returns_false_for_unlisted() {
+        let (env, _, _, client) = setup();
+        let unknown = Address::generate(&env);
+        assert!(!client.is_whitelisted(&unknown));
+    }
+
+    #[test]
+    fn test_assert_whitelisted_passes_for_listed() {
+        let (env, _, _, client) = setup();
+        let allowed = Address::generate(&env);
+        client.add_to_whitelist(&allowed);
+        client.assert_whitelisted(&allowed);
+    }
+
+    #[test]
+    #[should_panic(expected = "address not whitelisted")]
+    fn test_assert_whitelisted_panics_for_unlisted() {
+        let (env, _, _, client) = setup();
+        let unknown = Address::generate(&env);
+        client.assert_whitelisted(&unknown);
+    }
+
+    #[test]
+    fn test_whitelist_is_independent_per_contract() {
+        let (env, _, _, _) = setup();
+        let addr = Address::generate(&env);
+
+        let contract_a = env.register_contract(None, AdminControls);
+        let client_a = AdminControlsClient::new(&env, &contract_a);
+        let admin_a = Address::generate(&env);
+        let oracle_a = Address::generate(&env);
+        client_a.initialize(&admin_a, &oracle_a);
+
+        let contract_b = env.register_contract(None, AdminControls);
+        let client_b = AdminControlsClient::new(&env, &contract_b);
+        let admin_b = Address::generate(&env);
+        let oracle_b = Address::generate(&env);
+        client_b.initialize(&admin_b, &oracle_b);
+
+        client_a.add_to_whitelist(&addr);
+        assert!(client_a.is_whitelisted(&addr));
+        assert!(!client_b.is_whitelisted(&addr));
     }
 }

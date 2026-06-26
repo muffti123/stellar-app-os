@@ -236,6 +236,7 @@ impl TreeEscrow {
             panic!("active escrow already exists for this farmer");
         }
 
+        contract_utils::assert_whitelisted(&env, &token);
         token::Client::new(&env, &token).transfer(&donor, &env.current_contract_address(), &amount);
 
         let empty_hash = BytesN::from_array(&env, &[0; 32]);
@@ -288,6 +289,7 @@ impl TreeEscrow {
             total += slot.amount;
         }
 
+        contract_utils::assert_whitelisted(&env, &token);
         token::Client::new(&env, &token)
             .transfer(&donor, &env.current_contract_address(), &total);
 
@@ -527,6 +529,7 @@ impl TreeEscrow {
     pub fn register_tree(env: Env, tree_id: u64, farmer: Address, token: Address) {
         let (admin, _tree_token, _decimals) = Self::admin_tree(&env);
         admin.require_auth();
+        contract_utils::assert_whitelisted(&env, &token);
 
         let key = DataKey::TreeFunding(tree_id);
         if env.storage().persistent().has(&key) {
@@ -702,6 +705,32 @@ impl TreeEscrow {
             .get(&DataKey::TreeFunding(tree_id))
     }
 
+    // ── Whitelist management ──────────────────────────────────────────────────
+
+    /// Add `addr` to the contract whitelist. Restricted to admin.
+    pub fn add_to_whitelist(env: Env, addr: Address) {
+        let (admin, _tree_token, _decimals) = Self::admin_tree(&env);
+        admin.require_auth();
+        contract_utils::add_to_whitelist(&env, &addr);
+    }
+
+    /// Remove `addr` from the contract whitelist. Restricted to admin.
+    pub fn remove_from_whitelist(env: Env, addr: Address) {
+        let (admin, _tree_token, _decimals) = Self::admin_tree(&env);
+        admin.require_auth();
+        contract_utils::remove_from_whitelist(&env, &addr);
+    }
+
+    /// Returns `true` if `addr` is whitelisted.
+    pub fn is_whitelisted(env: Env, addr: Address) -> bool {
+        contract_utils::is_whitelisted(&env, &addr)
+    }
+
+    /// Panics if `addr` is not whitelisted.
+    pub fn assert_whitelisted(env: Env, addr: Address) {
+        contract_utils::assert_whitelisted(&env, &addr);
+    }
+
     // ── internal helpers ──────────────────────────────────────────────────────
 
     fn admin_tree(env: &Env) -> (Address, Address, u32) {
@@ -779,6 +808,8 @@ mod tests {
             .address();
 
         client.initialize(&admin, &tree_token_id, &oracle, &threshold);
+        client.add_to_whitelist(&tree_token_id);
+        client.add_to_whitelist(&token_id);
         Ctx {
             env,
             admin,

@@ -49,6 +49,7 @@ impl TreeToken {
         if env.storage().instance().has(&symbol_short!("ADMIN")) {
             panic!("already initialized");
         }
+        contract_utils::assert_whitelisted(&env, &tree_token);
         env.storage()
             .instance()
             .set(&symbol_short!("ADMIN"), &admin);
@@ -83,6 +84,7 @@ impl TreeToken {
             .get(&symbol_short!("TOKEN"))
             .expect("not initialized");
 
+        contract_utils::assert_whitelisted(&env, &tree_token);
         // Burn tokens from burner's balance via SAC interface
         token::Client::new(&env, &tree_token).burn(&burner, &amount);
 
@@ -176,6 +178,30 @@ impl TreeToken {
         }
     }
 
+    // ── Whitelist management ──────────────────────────────────────────────────
+
+    /// Add `addr` to the contract whitelist. Restricted to admin.
+    pub fn add_to_whitelist(env: Env, addr: Address) {
+        Self::require_admin(&env);
+        contract_utils::add_to_whitelist(&env, &addr);
+    }
+
+    /// Remove `addr` from the contract whitelist. Restricted to admin.
+    pub fn remove_from_whitelist(env: Env, addr: Address) {
+        Self::require_admin(&env);
+        contract_utils::remove_from_whitelist(&env, &addr);
+    }
+
+    /// Returns `true` if `addr` is whitelisted.
+    pub fn is_whitelisted(env: Env, addr: Address) -> bool {
+        contract_utils::is_whitelisted(&env, &addr)
+    }
+
+    /// Panics if `addr` is not whitelisted.
+    pub fn assert_whitelisted(env: Env, addr: Address) {
+        contract_utils::assert_whitelisted(&env, &addr);
+    }
+
     fn burn_key(env: &Env, idx: u64) -> soroban_sdk::Val {
         (symbol_short!("BURN"), idx).into_val(env)
     }
@@ -206,6 +232,7 @@ mod tests {
         token::StellarAssetClient::new(&env, &tree_token_id).mint(&burner, &1_000_000);
 
         client.initialize(&admin, &tree_token_id);
+        client.add_to_whitelist(&tree_token_id);
 
         (env, admin, burner, tree_token_id, client)
     }

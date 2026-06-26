@@ -96,6 +96,7 @@ impl DonationEscrow {
         if token != xlm && token != usdc {
             panic!("unsupported token");
         }
+        contract_utils::assert_whitelisted(&env, &token);
 
         let (batch_id, seq): (u32, u64) = env
             .storage()
@@ -260,6 +261,7 @@ impl DonationEscrow {
         if token != xlm && token != usdc {
             panic!("unsupported token");
         }
+        contract_utils::assert_whitelisted(&env, &token);
 
         let id: u64 = env
             .storage()
@@ -416,6 +418,30 @@ impl DonationEscrow {
 
         admin.require_auth();
     }
+
+    // ── Whitelist management ──────────────────────────────────────────────────
+
+    /// Add `addr` to the contract whitelist. Restricted to admin.
+    pub fn add_to_whitelist(env: Env, addr: Address) {
+        Self::require_admin(&env);
+        contract_utils::add_to_whitelist(&env, &addr);
+    }
+
+    /// Remove `addr` from the contract whitelist. Restricted to admin.
+    pub fn remove_from_whitelist(env: Env, addr: Address) {
+        Self::require_admin(&env);
+        contract_utils::remove_from_whitelist(&env, &addr);
+    }
+
+    /// Returns `true` if `addr` is whitelisted.
+    pub fn is_whitelisted(env: Env, addr: Address) -> bool {
+        contract_utils::is_whitelisted(&env, &addr)
+    }
+
+    /// Panics if `addr` is not whitelisted.
+    pub fn assert_whitelisted(env: Env, addr: Address) {
+        contract_utils::assert_whitelisted(&env, &addr);
+    }
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -452,6 +478,8 @@ mod tests {
         token::StellarAssetClient::new(&env, &usdc).mint(&donor, &100_000);
 
         client.initialize(&admin, &xlm, &usdc);
+        client.add_to_whitelist(&xlm);
+        client.add_to_whitelist(&usdc);
 
         (env, admin, donor, xlm, usdc, client)
     }
