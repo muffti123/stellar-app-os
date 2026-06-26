@@ -16,12 +16,24 @@ interface FooterSection {
   links: FooterLink[];
 }
 
-interface SocialLink {
-  label: string;
-  href: string;
-  icon: React.ComponentType<{ className?: string }>;
-  ariaLabel: string;
-}
+const aboutSection: FooterSection = {
+  title: 'About',
+  links: [
+    { label: 'About FarmCredit', href: '#about' },
+    { label: 'Blog', href: '/blog' },
+    { label: 'Leaderboard', href: '/leaderboard' },
+    { label: 'Documentation', href: '#docs' },
+  ],
+};
+
+const resourcesSection: FooterSection = {
+  title: 'Resources',
+  links: [
+    { label: 'API Documentation', href: '#api-docs' },
+    { label: 'Developer Guide', href: '#dev-guide' },
+    { label: 'Community', href: '#community' },
+  ],
+};
 
 function buildFooterSections(t: TFunction): FooterSection[] {
   return [

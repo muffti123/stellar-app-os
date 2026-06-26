@@ -15,14 +15,7 @@ import {
   CardDescription,
   CardContent,
 } from '@/components/molecules/Card';
-import { useToast } from '@/hooks/useToast';
-import { TransactionHistoryModal } from '@/components/ui/TransactionHistoryModal';
-import { useAppTranslation } from '@/hooks/useTranslation';
-
-export default function Home(): JSX.Element {
-  const [showTx, setShowTx] = useState(false);
-  const { addToast } = useToast();
-  const { t } = useAppTranslation();
+import { OnboardingTour } from '@/components/organisms/OnboardingTour/OnboardingTour';
 
   return (
     <div className="flex min-h-screen flex-col items-center justify-center gap-8 p-8">
@@ -124,6 +117,9 @@ export default function Home(): JSX.Element {
             className="w-full"
           >
             <Link href="/credits/purchase">Purchase Carbon Credits</Link>
+          </Button>
+          <Button asChild variant="outline" size="lg" className="w-full">
+            <Link href="/leaderboard">View Leaderboard</Link>
           </Button>
         </CardContent>
       </Card>
