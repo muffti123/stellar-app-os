@@ -38,6 +38,9 @@ const BPS_DENOM: i128 = 10_000;
 /// 6 months in seconds (approx 26 weeks)
 const SIX_MONTHS_SECS: u64 = 60 * 60 * 24 * 7 * 26;
 
+/// Window in which a sponsor may challenge a verification outcome (#469)
+const DISPUTE_WINDOW_SECS: u64 = 60 * 60 * 24 * 7;
+
 /// Maximum slots per batch deposit (Stellar operation limit safety margin)
 const MAX_BATCH_SIZE: u32 = 50;
 
@@ -105,6 +108,33 @@ pub struct Contribution {
     pub amount: i128,
 }
 
+/// Outcome of a sponsor-initiated verification dispute (#469).
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub enum DisputeOutcome {
+    /// DAO upheld the verification — pending fund release may proceed.
+    VerificationUpheld,
+    /// DAO overturned the verification — funds remain locked for refund.
+    VerificationOverturned,
+}
+
+/// Sponsor dispute record keyed by tree_id.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct DisputeRecord {
+    pub tree_id: u64,
+    pub sponsor: Address,
+    /// Content-address hash of off-chain evidence (IPFS CID digest).
+    pub evidence_cid: BytesN<32>,
+    pub opened_at: u64,
+    pub resolved: bool,
+    pub outcome: DisputeOutcome,
+    /// DAO votes that the verification should stand.
+    pub votes_uphold: u32,
+    /// DAO votes that the verification should be overturned.
+    pub votes_overturn: u32,
+}
+
 /// Co-funded tree escrow record: multiple contributors share a single pool
 /// with proportional payouts on release.
 #[contracttype]
@@ -135,6 +165,10 @@ enum DataKey {
     OracleReport(u64),
     /// Per-tree co-funded escrow record
     TreeFunding(u64),
+    /// Sponsor dispute on a verification outcome (#469)
+    Dispute(u64),
+    /// DAO members authorised to arbitrate disputes
+    DaoMembers,
 }
 
 // ── Contract ──────────────────────────────────────────────────────────────────
@@ -631,6 +665,9 @@ impl TreeEscrow {
         if funding.status != TreeFundingStatus::Open {
             panic!("tree not open for release");
         }
+        if Self::dispute_is_open(&env, tree_id) {
+            panic!("fund release paused: dispute is open");
+        }
         if funding.total_funded <= 0 {
             panic!("no funds to release");
         }
@@ -702,6 +739,162 @@ impl TreeEscrow {
             .get(&DataKey::TreeFunding(tree_id))
     }
 
+    // ── Dispute resolution (#469) ─────────────────────────────────────────────
+
+    /// Admin configures the DAO member set that may vote on verification disputes.
+    pub fn set_dao_members(env: Env, members: soroban_sdk::Vec<Address>) {
+        let (admin, _tree_token, _decimals) = Self::admin_tree(&env);
+        admin.require_auth();
+        env.storage()
+            .instance()
+            .set(&DataKey::DaoMembers, &members);
+    }
+
+    pub fn get_dao_members(env: Env) -> soroban_sdk::Vec<Address> {
+        env.storage()
+            .instance()
+            .get(&DataKey::DaoMembers)
+            .unwrap_or_else(|| soroban_sdk::Vec::new(&env))
+    }
+
+    /// Sponsor opens a dispute within 7 days of an oracle verification report.
+    /// Pauses any pending proportional fund release for the tree.
+    pub fn open_dispute(
+        env: Env,
+        sponsor: Address,
+        tree_id: u64,
+        evidence_cid: BytesN<32>,
+    ) {
+        sponsor.require_auth();
+
+        let report: OracleReport = env
+            .storage()
+            .persistent()
+            .get(&DataKey::OracleReport(tree_id))
+            .expect("no verification report for tree");
+
+        let now = env.ledger().timestamp();
+        if now > report.reported_at + DISPUTE_WINDOW_SECS {
+            panic!("dispute window expired");
+        }
+
+        let dispute_key = DataKey::Dispute(tree_id);
+        if let Some(existing) = env.storage().persistent().get::<_, DisputeRecord>(&dispute_key) {
+            if !existing.resolved {
+                panic!("dispute already open for tree");
+            }
+        }
+
+        let funding: TreeFunding = env
+            .storage()
+            .persistent()
+            .get(&DataKey::TreeFunding(tree_id))
+            .expect("tree not registered");
+
+        if !Self::is_tree_contributor(&funding, &sponsor) {
+            panic!("only a tree contributor may open a dispute");
+        }
+
+        let dispute = DisputeRecord {
+            tree_id,
+            sponsor: sponsor.clone(),
+            evidence_cid,
+            opened_at: now,
+            resolved: false,
+            outcome: DisputeOutcome::VerificationUpheld,
+            votes_uphold: 0,
+            votes_overturn: 0,
+        };
+
+        env.storage().persistent().set(&dispute_key, &dispute);
+
+        env.events().publish(
+            (symbol_short!("DispOpen"), tree_id),
+            sponsor,
+        );
+    }
+
+    /// DAO member casts an arbitration vote on an open dispute.
+    pub fn cast_dao_vote(env: Env, voter: Address, tree_id: u64, uphold_verification: bool) {
+        voter.require_auth();
+
+        if !Self::is_dao_member(&env, &voter) {
+            panic!("caller is not a DAO member");
+        }
+
+        let dispute_key = DataKey::Dispute(tree_id);
+        let mut dispute: DisputeRecord = env
+            .storage()
+            .persistent()
+            .get(&dispute_key)
+            .expect("no dispute for tree");
+
+        if dispute.resolved {
+            panic!("dispute already resolved");
+        }
+
+        if uphold_verification {
+            dispute.votes_uphold += 1;
+        } else {
+            dispute.votes_overturn += 1;
+        }
+
+        env.storage().persistent().set(&dispute_key, &dispute);
+
+        env.events().publish(
+            (symbol_short!("DaoVote"), tree_id),
+            (voter, uphold_verification),
+        );
+    }
+
+    /// Tally DAO votes and resolve the dispute. Emits `DisputeResolved`.
+    pub fn resolve_dispute(env: Env, resolver: Address, tree_id: u64) {
+        let (admin, _tree_token, _decimals) = Self::admin_tree(&env);
+        if resolver != admin && !Self::is_dao_member(&env, &resolver) {
+            panic!("unauthorized resolver");
+        }
+        resolver.require_auth();
+
+        let dispute_key = DataKey::Dispute(tree_id);
+        let mut dispute: DisputeRecord = env
+            .storage()
+            .persistent()
+            .get(&dispute_key)
+            .expect("no dispute for tree");
+
+        if dispute.resolved {
+            panic!("dispute already resolved");
+        }
+
+        let total_votes = dispute.votes_uphold + dispute.votes_overturn;
+        if total_votes == 0 {
+            panic!("no DAO votes cast");
+        }
+
+        let outcome = if dispute.votes_overturn > dispute.votes_uphold {
+            DisputeOutcome::VerificationOverturned
+        } else {
+            DisputeOutcome::VerificationUpheld
+        };
+
+        dispute.resolved = true;
+        dispute.outcome = outcome.clone();
+        env.storage().persistent().set(&dispute_key, &dispute);
+
+        env.events().publish(
+            (symbol_short!("DispResol"), tree_id),
+            outcome,
+        );
+    }
+
+    pub fn get_dispute(env: Env, tree_id: u64) -> Option<DisputeRecord> {
+        env.storage().persistent().get(&DataKey::Dispute(tree_id))
+    }
+
+    pub fn has_open_dispute(env: Env, tree_id: u64) -> bool {
+        Self::dispute_is_open(&env, tree_id)
+    }
+
     // ── internal helpers ──────────────────────────────────────────────────────
 
     fn admin_tree(env: &Env) -> (Address, Address, u32) {
@@ -716,6 +909,38 @@ impl TreeEscrow {
             .instance()
             .get(&DataKey::SurvivalThreshold)
             .expect("contract not initialized")
+    }
+
+    fn dispute_is_open(env: &Env, tree_id: u64) -> bool {
+        env.storage()
+            .persistent()
+            .get::<_, DisputeRecord>(&DataKey::Dispute(tree_id))
+            .map(|d| !d.resolved)
+            .unwrap_or(false)
+    }
+
+    fn is_dao_member(env: &Env, address: &Address) -> bool {
+        let members: soroban_sdk::Vec<Address> = env
+            .storage()
+            .instance()
+            .get(&DataKey::DaoMembers)
+            .unwrap_or_else(|| soroban_sdk::Vec::new(env));
+
+        for i in 0..members.len() {
+            if members.get(i).unwrap() == *address {
+                return true;
+            }
+        }
+        false
+    }
+
+    fn is_tree_contributor(funding: &TreeFunding, address: &Address) -> bool {
+        for i in 0..funding.contributions.len() {
+            if funding.contributions.get(i).unwrap().funder == *address {
+                return true;
+            }
+        }
+        false
     }
 
     fn compute_token_unit(decimals: u32) -> i128 {
@@ -1002,10 +1227,12 @@ mod tests {
             BatchSlot {
                 farmer: f1.clone(),
                 amount: 1_500,
+                gift_recipient: None,
             },
             BatchSlot {
                 farmer: f2.clone(),
                 amount: 2_500,
+                gift_recipient: None,
             },
         ];
         ctx.client.batch_deposit(&ctx.donor, &ctx.token, &slots);
@@ -1227,5 +1454,77 @@ mod tests {
         ctx.client.submit_survival_report(&ctx.oracle, &7, &80);
         ctx.client.release_proportional(&7, &1_000);
         ctx.client.release_proportional(&7, &1);
+    }
+
+    // ── Dispute resolution (#469) ─────────────────────────────────────────────
+
+    #[test]
+    fn test_open_dispute_pauses_fund_release() {
+        let ctx = setup();
+        let sponsor = Address::generate(&ctx.env);
+        let dao = Address::generate(&ctx.env);
+        ctx.client.set_dao_members(&vec![&ctx.env, dao.clone()]);
+
+        register_and_contribute(&ctx, 20, &[(sponsor.clone(), 5_000)]);
+        ctx.client.submit_survival_report(&ctx.oracle, &20, &85);
+
+        ctx.client.open_dispute(&sponsor, &20, &proof(&ctx.env, 9));
+        assert!(ctx.client.has_open_dispute(&20));
+
+        ctx.client.cast_dao_vote(&dao, &20, &false);
+        ctx.client.resolve_dispute(&dao, &20);
+
+        let dispute = ctx.client.get_dispute(&20).unwrap();
+        assert!(dispute.resolved);
+        assert_eq!(dispute.outcome, DisputeOutcome::VerificationOverturned);
+    }
+
+    #[test]
+    #[should_panic(expected = "fund release paused: dispute is open")]
+    fn test_release_blocked_while_dispute_open() {
+        let ctx = setup();
+        let sponsor = Address::generate(&ctx.env);
+        register_and_contribute(&ctx, 21, &[(sponsor.clone(), 3_000)]);
+        ctx.client.submit_survival_report(&ctx.oracle, &21, &80);
+        ctx.client.open_dispute(&sponsor, &21, &proof(&ctx.env, 10));
+        ctx.client.release_proportional(&21, &3_000);
+    }
+
+    #[test]
+    #[should_panic(expected = "dispute window expired")]
+    fn test_open_dispute_rejected_after_seven_days() {
+        let ctx = setup();
+        let sponsor = Address::generate(&ctx.env);
+        register_and_contribute(&ctx, 22, &[(sponsor.clone(), 1_000)]);
+        ctx.client.submit_survival_report(&ctx.oracle, &22, &80);
+        ctx.env
+            .ledger()
+            .with_mut(|l| l.timestamp += DISPUTE_WINDOW_SECS + 1);
+        ctx.client.open_dispute(&sponsor, &22, &proof(&ctx.env, 11));
+    }
+
+    #[test]
+    fn test_dao_upholds_verification_and_release_proceeds() {
+        let ctx = setup();
+        let sponsor = Address::generate(&ctx.env);
+        let dao = Address::generate(&ctx.env);
+        ctx.client.set_dao_members(&vec![&ctx.env, dao.clone()]);
+
+        register_and_contribute(&ctx, 23, &[(sponsor.clone(), 4_000)]);
+        ctx.client.submit_survival_report(&ctx.oracle, &23, &90);
+        ctx.client.open_dispute(&sponsor, &23, &proof(&ctx.env, 12));
+
+        ctx.client.cast_dao_vote(&dao, &23, &true);
+        ctx.client.resolve_dispute(&dao, &23);
+
+        assert!(!ctx.client.has_open_dispute(&23));
+        assert_eq!(
+            ctx.client.get_dispute(&23).unwrap().outcome,
+            DisputeOutcome::VerificationUpheld
+        );
+
+        let pre = balance(&ctx.env, &ctx.token, &sponsor);
+        ctx.client.release_proportional(&23, &4_000);
+        assert_eq!(balance(&ctx.env, &ctx.token, &sponsor) - pre, 4_000);
     }
 }
