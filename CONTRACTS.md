@@ -12,6 +12,7 @@ All contracts are deployed on the Stellar network (Soroban). Invoke them via the
 | `escrow-milestone` | Single-milestone escrow with remainder release |
 | `location-proof` | ZK location proofs for Northern Nigeria boundary |
 | `nullifier-registry` | SHA-256 commitment registry — prevents double-counting |
+| `species-voting` | On-chain governance for adding new tree species to the catalogue |
 
 ---
 
@@ -33,6 +34,9 @@ Contracts panic with a descriptive string on invalid input. The Stellar SDK surf
 | `"no escrow for farmer"` / `"no escrow found for farmer"` | Farmer address has no escrow record |
 | `"commitment already registered"` | Duplicate nullifier / replay attempt |
 | `"location outside Northern Nigeria boundary"` | `in_region = false` passed to `submit_proof` |
+| `"must hold TREE tokens to vote"` | Voter has zero TREE token balance |
+| `"already voted on this proposal"` | Duplicate vote attempt |
+| `"proposal has not passed"` | Attempting to execute a non-passed proposal |
 
 ---
 
@@ -444,6 +448,206 @@ Returns the full registry entry for a commitment.
 ```ts
 const entry = await client.get_entry({ commitment });
 // entry.farmer_id, entry.registered_at
+```
+
+---
+
+## species-voting
+
+On-chain governance for adding new tree species to the species catalogue. TREE token holders can propose and vote on new species additions.
+
+### `initialize`
+
+One-time setup. Configures the voting contract with token and registry addresses.
+
+**Auth:** deployer (anyone, once)
+
+| Parameter | Type | Description |
+|---|---|---|
+| `admin` | `Address` | Admin address for contract management |
+| `tree_token` | `Address` | TREE token contract address |
+| `species_registry` | `Address` | Species registry contract address |
+| `voting_threshold` | `i128` | Minimum votes required (in token base units) |
+| `voting_period` | `u64` | Voting window in seconds (default 604800 = 7 days) |
+
+**Returns:** `void`
+
+**Errors:** panics with `"already initialized"` if called again.
+
+```ts
+await client.initialize({
+  admin: adminAddress,
+  tree_token: treeTokenAddress,
+  species_registry: speciesRegistryAddress,
+  voting_threshold: BigInt(1_000_000),
+  voting_period: BigInt(604800),
+});
+```
+
+---
+
+### `propose_species`
+
+Create a new species proposal.
+
+**Auth:** caller-auth (proposer)
+
+| Parameter | Type | Description |
+|---|---|---|
+| `slug` | `Symbol` | Short identifier (e.g., "mahogany") |
+| `name` | `String` | Human-readable name |
+| `co2_scaled` | `i128` | kg CO₂/year × 100 |
+| `maturity_years` | `u32` | Years to biomass maturity |
+
+**Returns:** `void`
+
+**Events emitted:** `proposal(created) → (id, slug, name)`
+
+**Errors:**
+- `"co2_scaled must be positive"` — `co2_scaled ≤ 0`
+- `"maturity_years must be > 0"` — `maturity_years = 0`
+
+```ts
+await client.propose_species({
+  slug: Symbol.short('mahogany'),
+  name: String.fromString('Mahogany'),
+  co2_scaled: BigInt(2500),
+  maturity_years: 25,
+});
+```
+
+---
+
+### `vote`
+
+Vote on a proposal. Voting power is proportional to TREE token holdings.
+
+**Auth:** caller-auth (voter)
+
+| Parameter | Type | Description |
+|---|---|---|
+| `proposal_id` | `u64` | Proposal to vote on |
+| `vote_for` | `bool` | true to vote for, false to vote against |
+
+**Returns:** `void`
+
+**Events emitted:** `vote(proposal_id) → (voter, vote_for, power)`
+
+**Errors:**
+- `"proposal not found"` — Invalid proposal ID
+- `"proposal is not active"` — Proposal already closed
+- `"voting period has ended"` — Past voting deadline
+- `"already voted on this proposal"` — Duplicate vote
+- `"must hold TREE tokens to vote"` — Zero token balance
+
+```ts
+await client.vote({
+  proposal_id: 1,
+  vote_for: true,
+});
+```
+
+---
+
+### `execute_proposal`
+
+Execute a passed proposal to register the species in the species registry.
+
+**Auth:** caller-auth (anyone)
+
+| Parameter | Type | Description |
+|---|---|---|
+| `proposal_id` | `u64` | Proposal to execute |
+
+**Returns:** `void`
+
+**Events emitted:** `proposal(executed) → (proposal_id, slug)`
+
+**Errors:**
+- `"proposal not found"` — Invalid proposal ID
+- `"proposal has not passed"` — Proposal didn't meet threshold
+
+```ts
+await client.execute_proposal({
+  proposal_id: 1,
+});
+```
+
+---
+
+### `get_proposal`
+
+Read-only. Returns the full proposal record.
+
+| Parameter | Type | Description |
+|---|---|---|
+| `proposal_id` | `u64` | Proposal ID to look up |
+
+**Returns:** `ProposalRecord`
+
+```ts
+const proposal = await client.get_proposal({ proposal_id: 1 });
+// proposal.id, proposal.slug, proposal.name, proposal.co2_scaled
+// proposal.maturity_years, proposal.proposer, proposal.votes_for
+// proposal.votes_against, proposal.status, proposal.created_at
+// proposal.voting_ends_at
+```
+
+---
+
+### `get_vote`
+
+Read-only. Returns a voter's record for a proposal.
+
+| Parameter | Type | Description |
+|---|---|---|
+| `proposal_id` | `u64` | Proposal ID |
+| `voter` | `Address` | Voter address |
+
+**Returns:** `Option<VoteRecord>`
+
+---
+
+### `proposal_count`
+
+Read-only. Returns total number of proposals created.
+
+**Returns:** `u64`
+
+---
+
+### `voting_threshold` / `voting_period`
+
+Read-only. Returns current governance parameters.
+
+**Returns:** `i128` / `u64`
+
+---
+
+### Admin Functions
+
+#### `update_voting_threshold`
+
+Update the minimum votes required for proposals to pass.
+
+**Auth:** admin-only
+
+```ts
+await client.update_voting_threshold({
+  new_threshold: BigInt(2_000_000),
+});
+```
+
+#### `update_voting_period`
+
+Update the voting window duration.
+
+**Auth:** admin-only
+
+```ts
+await client.update_voting_period({
+  new_period: BigInt(1_209_600), // 14 days
+});
 ```
 
 ---
