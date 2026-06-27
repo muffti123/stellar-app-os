@@ -15,8 +15,10 @@
 //! The admin can pause/unpause and update the oracle address.
 
 use soroban_sdk::{
-    contract, contractimpl, contracttype, symbol_short, token, Address, Env, IntoVal, Symbol,
+    contract, contractimpl, contracttype, panic_with_error, symbol_short, token, Address, Env,
+    IntoVal, Symbol,
 };
+use harvesta_errors::HarvestaError;
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -47,7 +49,7 @@ impl TreeToken {
     /// `tree_token` — address of the deployed TREE SAC token contract
     pub fn initialize(env: Env, admin: Address, tree_token: Address) {
         if env.storage().instance().has(&symbol_short!("ADMIN")) {
-            panic!("already initialized");
+            panic_with_error!(&env, HarvestaError::AlreadyInitialized);
         }
         env.storage()
             .instance()
@@ -74,14 +76,14 @@ impl TreeToken {
         burner.require_auth();
 
         if amount <= 0 {
-            panic!("burn amount must be positive");
+            panic_with_error!(&env, HarvestaError::BurnAmountMustBePositive);
         }
 
         let tree_token: Address = env
             .storage()
             .instance()
             .get(&symbol_short!("TOKEN"))
-            .expect("not initialized");
+            .unwrap_or_else(|| panic_with_error!(&env, HarvestaError::NotInitialized));
 
         // Burn tokens from burner's balance via SAC interface
         token::Client::new(&env, &tree_token).burn(&burner, &amount);
@@ -161,7 +163,7 @@ impl TreeToken {
             .storage()
             .instance()
             .get(&symbol_short!("ADMIN"))
-            .expect("not initialized");
+            .unwrap_or_else(|| panic_with_error!(env, HarvestaError::NotInitialized));
         admin.require_auth();
     }
 
@@ -172,7 +174,7 @@ impl TreeToken {
             .get(&symbol_short!("PAUSED"))
             .unwrap_or(false);
         if paused {
-            panic!("contract is paused");
+            panic_with_error!(env, HarvestaError::ContractPaused);
         }
     }
 
@@ -250,14 +252,14 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "burn amount must be positive")]
+    #[should_panic(expected = "Error(Contract, #14)")]
     fn test_zero_burn_rejected() {
         let (env, _, burner, _, client) = setup();
         client.burn(&burner, &0, &esg_ref(&env));
     }
 
     #[test]
-    #[should_panic(expected = "contract is paused")]
+    #[should_panic(expected = "Error(Contract, #4)")]
     fn test_burn_while_paused_rejected() {
         let (env, _, burner, _, client) = setup();
         client.pause();
@@ -280,7 +282,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "already initialized")]
+    #[should_panic(expected = "Error(Contract, #1)")]
     fn test_double_initialize_rejected() {
         let (env, admin, _, tree_token, client) = setup();
         client.initialize(&admin, &tree_token);

@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "harvesta-errors",
     "nullifier-registry",
     "escrow-milestone",
     "tree-escrow",
@@ -13,6 +14,8 @@ members = [
     "admin-controls",
     "kyc-attestation",
     "species-registry",
+    "verifier-staking",
+    "carbon-marketplace",
 ]
 resolver = "2"
 

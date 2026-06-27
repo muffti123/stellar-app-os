@@ -6,8 +6,10 @@
 //! keyed by `(farmer_id, version)`. Each update increments a version counter
 //! and emits a `ProfileUpdated` event carrying the old and new data hashes.
 
+use harvesta_errors::HarvestaError;
 use soroban_sdk::{
-    contract, contractimpl, contracttype, symbol_short, Address, BytesN, Env, IntoVal, String,
+    contract, contractimpl, contracttype, panic_with_error, symbol_short, Address, BytesN, Env,
+    IntoVal, String,
 };
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -40,7 +42,7 @@ impl FarmerRegistry {
     /// Initialize contract
     pub fn initialize(env: Env, admin: Address) {
         if env.storage().instance().has(&symbol_short!("ADMIN")) {
-            panic!("already initialized");
+            panic_with_error!(&env, HarvestaError::AlreadyInitialized);
         }
         env.storage()
             .instance()
@@ -61,7 +63,7 @@ impl FarmerRegistry {
         let key = Self::farmer_key(&env, &wallet_address);
 
         if env.storage().persistent().has(&key) {
-            panic!("farmer already registered");
+            panic_with_error!(&env, HarvestaError::FarmerAlreadyRegistered);
         }
 
         let profile = FarmerProfile {
@@ -116,7 +118,7 @@ impl FarmerRegistry {
             .storage()
             .persistent()
             .get(&key)
-            .expect("farmer not registered");
+            .unwrap_or_else(|| panic_with_error!(&env, HarvestaError::FarmerNotRegistered));
 
         // Increment version counter
         let version_key = Self::version_counter_key(&env, &wallet_address);
@@ -207,7 +209,7 @@ impl FarmerRegistry {
             }
         }
 
-        panic!("region is not within the approved Northern Nigeria geohash boundary");
+        panic_with_error!(env, HarvestaError::InvalidRegion);
     }
 }
 
@@ -325,7 +327,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "farmer not registered")]
+    #[should_panic(expected = "Error(Contract, #36)")]
     fn test_update_profile_on_unregistered_farmer_rejected() {
         let (env, _, client) = setup();
         let stranger = Address::generate(&env);
@@ -338,9 +340,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(
-        expected = "region is not within the approved Northern Nigeria geohash boundary"
-    )]
+    #[should_panic(expected = "Error(Contract, #37)")]
     fn test_update_profile_invalid_region_rejected() {
         let (env, _, client) = setup();
         let farmer = Address::generate(&env);
@@ -353,7 +353,7 @@ mod tests {
     // ── existing tests ────────────────────────────────────────────────────────
 
     #[test]
-    #[should_panic(expected = "farmer already registered")]
+    #[should_panic(expected = "Error(Contract, #35)")]
     fn test_double_registration_rejected() {
         let (env, _, client) = setup();
         let farmer = Address::generate(&env);
@@ -363,9 +363,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(
-        expected = "region is not within the approved Northern Nigeria geohash boundary"
-    )]
+    #[should_panic(expected = "Error(Contract, #37)")]
     fn test_invalid_region_rejected() {
         let (env, _, client) = setup();
         let farmer = Address::generate(&env);

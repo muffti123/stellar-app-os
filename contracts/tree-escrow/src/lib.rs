@@ -24,10 +24,16 @@
 //!     tree's survival rate. Stored as an `OracleReport` keyed by tree_id.
 //!   • The configurable `SurvivalThreshold` (set at init) gates Tranche 2
 //!     release for both flows.
+//!
+//! ## Tree ID QR hash — Closes #496
+//!   • `register_qr_hash` — admin stores the SHA-256 of a physical QR label
+//!     payload against a tree_id for later verification.
+//!   • `get_qr_hash` — retrieve the stored hash for off-chain label checking.
 
 use soroban_sdk::{
     contract, contractimpl, contracttype, symbol_short, token, Address, BytesN, Env, Vec,
 };
+use harvesta_errors::HarvestaError;
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -135,6 +141,8 @@ enum DataKey {
     OracleReport(u64),
     /// Per-tree co-funded escrow record
     TreeFunding(u64),
+    /// SHA-256 of QR code payload for a given tree_id (#496)
+    QrHash(u64),
 }
 
 // ── Contract ──────────────────────────────────────────────────────────────────
@@ -158,15 +166,15 @@ impl TreeEscrow {
         survival_threshold_percent: u32,
     ) {
         if env.storage().instance().has(&DataKey::AdminTree) {
-            panic!("already initialized");
+            panic_with_error!(&env, HarvestaError::AlreadyInitialized);
         }
         if survival_threshold_percent > 100 {
-            panic!("survival threshold must be 0..=100");
+            panic_with_error!(&env, HarvestaError::SurvivalThresholdOutOfRange);
         }
         if token::StellarAssetClient::new(&env, &tree_token).admin()
             != env.current_contract_address()
         {
-            panic!("contract must be tree token admin");
+            panic_with_error!(&env, HarvestaError::ContractMustBeTreeTokenAdmin);
         }
 
         let tree_decimals = token::Client::new(&env, &tree_token).decimals();
@@ -194,13 +202,7 @@ impl TreeEscrow {
         Self::deposit_internal(env, donor, None, farmer, token, amount, tree_count);
     }
 
-    /// Sponsor trees as a gift - NFT receipt and carbon credits go to a different recipient address.
-    ///
-    /// `recipient_wallet` - the address that will receive the TREE tokens (NFT receipt and carbon credits)
-    /// `farmer` - the farmer to plant the trees
-    /// `token` - the token to use for payment (XLM or USDC)
-    /// `amount` - the total amount to deposit
-    /// `tree_count` - the maximum number of trees covered by this donation
+    /// Sponsor trees as a gift — NFT receipt and carbon credits go to a different recipient address.
     pub fn sponsor_as_gift(
         env: Env,
         donor: Address,
@@ -225,15 +227,15 @@ impl TreeEscrow {
         donor.require_auth();
 
         if amount <= 0 {
-            panic!("amount must be positive");
+            panic_with_error!(&env, HarvestaError::AmountMustBePositive);
         }
         if tree_count <= 0 {
-            panic!("tree count must be positive");
+            panic_with_error!(&env, HarvestaError::TreeCountMustBePositive);
         }
 
         let key = DataKey::Escrow(farmer.clone());
         if env.storage().persistent().has(&key) {
-            panic!("active escrow already exists for this farmer");
+            panic_with_error!(&env, HarvestaError::EscrowAlreadyExists);
         }
 
         token::Client::new(&env, &token).transfer(&donor, &env.current_contract_address(), &amount);
@@ -269,21 +271,21 @@ impl TreeEscrow {
 
         let n = slots.len();
         if n == 0 {
-            panic!("batch must contain at least one slot");
+            panic_with_error!(&env, HarvestaError::BatchEmpty);
         }
         if n > MAX_BATCH_SIZE {
-            panic!("batch exceeds maximum size of 50");
+            panic_with_error!(&env, HarvestaError::BatchTooLarge);
         }
 
         let mut total: i128 = 0;
         for i in 0..n {
             let slot = slots.get(i).unwrap();
             if slot.amount <= 0 {
-                panic!("each slot amount must be positive");
+                panic_with_error!(&env, HarvestaError::SlotAmountMustBePositive);
             }
             let key = DataKey::Escrow(slot.farmer.clone());
             if env.storage().persistent().has(&key) {
-                panic!("active escrow already exists for a farmer in this batch");
+                panic_with_error!(&env, HarvestaError::EscrowAlreadyExists);
             }
             total += slot.amount;
         }
@@ -336,30 +338,30 @@ impl TreeEscrow {
             .storage()
             .persistent()
             .get(&key)
-            .expect("no escrow for farmer");
+            .unwrap_or_else(|| panic_with_error!(&env, HarvestaError::EscrowNotFound));
 
         if rec.status != EscrowStatus::Funded {
-            panic!("planting already verified or escrow not active");
+            panic_with_error!(&env, HarvestaError::PlantingAlreadyVerified);
         }
         if verified_tree_count <= 0 {
-            panic!("verified tree count must be positive");
+            panic_with_error!(&env, HarvestaError::VerifiedCountMustBePositive);
         }
         if verified_tree_count > rec.tree_count {
-            panic!("verified tree count exceeds donation");
+            panic_with_error!(&env, HarvestaError::VerifiedCountExceedsDonation);
         }
 
         let tranche1 = (rec.total_amount * TRANCHE_1_BPS) / BPS_DENOM;
-        let tree_unit = Self::compute_token_unit(tree_decimals);
+        let tree_unit = Self::compute_token_unit(&env, tree_decimals);
         let tree_tokens = verified_tree_count
             .checked_mul(tree_unit)
-            .expect("tree token mint amount overflow");
+            .unwrap_or_else(|| panic_with_error!(&env, HarvestaError::TreeTokenMintOverflow));
 
         token::Client::new(&env, &rec.token).transfer(
             &env.current_contract_address(),
             &rec.farmer,
             &tranche1,
         );
-        
+
         let recipient = rec.gift_recipient.clone().unwrap_or_else(|| rec.donor.clone());
         token::StellarAssetClient::new(&env, &tree_token).mint(&recipient, &tree_tokens);
 
@@ -390,7 +392,7 @@ impl TreeEscrow {
         admin.require_auth();
 
         if survival_rate_percent > 100 {
-            panic!("survival_rate must be between 0 and 100");
+            panic_with_error!(&env, HarvestaError::SurvivalRateOutOfRange);
         }
 
         let key = DataKey::Escrow(farmer.clone());
@@ -398,25 +400,25 @@ impl TreeEscrow {
             .storage()
             .persistent()
             .get(&key)
-            .expect("no escrow for farmer");
+            .unwrap_or_else(|| panic_with_error!(&env, HarvestaError::EscrowNotFound));
 
         if rec.status != EscrowStatus::Planted {
-            panic!("planting not yet verified");
+            panic_with_error!(&env, HarvestaError::PlantingNotVerified);
         }
 
         let now = env.ledger().timestamp();
         if now < rec.planted_at + SIX_MONTHS_SECS {
-            panic!("6-month survival period not yet elapsed");
+            panic_with_error!(&env, HarvestaError::SurvivalPeriodNotElapsed);
         }
 
         let threshold = Self::survival_threshold(&env);
         if survival_rate_percent < threshold {
-            panic!("survival rate below minimum");
+            panic_with_error!(&env, HarvestaError::SurvivalRateBelowMinimum);
         }
 
         let tranche2 = rec.total_amount - rec.released;
         if tranche2 <= 0 {
-            panic!("nothing left to release");
+            panic_with_error!(&env, HarvestaError::NothingToRelease);
         }
 
         token::Client::new(&env, &rec.token).transfer(
@@ -445,10 +447,10 @@ impl TreeEscrow {
             .storage()
             .persistent()
             .get(&key)
-            .expect("no escrow for farmer");
+            .unwrap_or_else(|| panic_with_error!(&env, HarvestaError::EscrowNotFound));
 
         if rec.status != EscrowStatus::Funded {
-            panic!("cannot refund after planting has been verified");
+            panic_with_error!(&env, HarvestaError::RefundAfterPlanting);
         }
 
         token::Client::new(&env, &rec.token).transfer(
@@ -482,15 +484,15 @@ impl TreeEscrow {
             .storage()
             .instance()
             .get(&DataKey::Oracle)
-            .expect("contract not initialized");
+            .unwrap_or_else(|| panic_with_error!(&env, HarvestaError::NotInitialized));
 
         if oracle != registered_oracle {
-            panic!("unauthorized oracle");
+            panic_with_error!(&env, HarvestaError::UnauthorizedOracle);
         }
         oracle.require_auth();
 
         if survival_rate_percent > 100 {
-            panic!("survival_rate must be between 0 and 100");
+            panic_with_error!(&env, HarvestaError::SurvivalRateOutOfRange);
         }
 
         let report = OracleReport {
@@ -530,7 +532,7 @@ impl TreeEscrow {
 
         let key = DataKey::TreeFunding(tree_id);
         if env.storage().persistent().has(&key) {
-            panic!("tree already registered");
+            panic_with_error!(&env, HarvestaError::TreeAlreadyRegistered);
         }
 
         let funding = TreeFunding {
@@ -554,7 +556,7 @@ impl TreeEscrow {
         funder.require_auth();
 
         if amount <= 0 {
-            panic!("amount must be positive");
+            panic_with_error!(&env, HarvestaError::AmountMustBePositive);
         }
 
         let key = DataKey::TreeFunding(tree_id);
@@ -562,10 +564,10 @@ impl TreeEscrow {
             .storage()
             .persistent()
             .get(&key)
-            .expect("tree not registered");
+            .unwrap_or_else(|| panic_with_error!(&env, HarvestaError::TreeNotRegistered));
 
         if funding.status != TreeFundingStatus::Open {
-            panic!("tree not open for contributions");
+            panic_with_error!(&env, HarvestaError::TreeNotOpenForContributions);
         }
 
         token::Client::new(&env, &funding.token).transfer(
@@ -601,11 +603,7 @@ impl TreeEscrow {
     }
 
     /// Pays out `payout_amount` from the pool, splitting it proportionally
-    /// across each contributor by their share of `total_funded`. Gated on an
-    /// oracle-submitted survival report ≥ the configured threshold.
-    /// The integer-division remainder goes to the largest contributor (ties
-    /// broken by earliest-recorded). Supports partial payouts; the funding
-    /// is marked `Released` once `released >= total_funded`.
+    /// across each contributor by their share of `total_funded`.
     pub fn release_proportional(env: Env, tree_id: u64, payout_amount: i128) {
         let (admin, _tree_token, _decimals) = Self::admin_tree(&env);
         admin.require_auth();
@@ -614,11 +612,11 @@ impl TreeEscrow {
             .storage()
             .persistent()
             .get(&DataKey::OracleReport(tree_id))
-            .expect("no oracle report for tree");
+            .unwrap_or_else(|| panic_with_error!(&env, HarvestaError::NoOracleReport));
 
         let threshold = Self::survival_threshold(&env);
         if report.survival_rate_percent < threshold {
-            panic!("survival rate below minimum");
+            panic_with_error!(&env, HarvestaError::SurvivalRateBelowMinimum);
         }
 
         let key = DataKey::TreeFunding(tree_id);
@@ -626,17 +624,17 @@ impl TreeEscrow {
             .storage()
             .persistent()
             .get(&key)
-            .expect("tree not registered");
+            .unwrap_or_else(|| panic_with_error!(&env, HarvestaError::TreeNotRegistered));
 
         if funding.status != TreeFundingStatus::Open {
-            panic!("tree not open for release");
+            panic_with_error!(&env, HarvestaError::TreeNotOpenForRelease);
         }
         if funding.total_funded <= 0 {
-            panic!("no funds to release");
+            panic_with_error!(&env, HarvestaError::NoFundsToRelease);
         }
         let remaining = funding.total_funded - funding.released;
         if payout_amount <= 0 || payout_amount > remaining {
-            panic!("invalid payout amount");
+            panic_with_error!(&env, HarvestaError::InvalidPayoutAmount);
         }
 
         let token_client = token::Client::new(&env, &funding.token);
@@ -653,9 +651,6 @@ impl TreeEscrow {
             }
         }
 
-        // Pay each non-largest contributor their proportional share. The
-        // largest is paid last so any integer-division remainder folds into
-        // their payout.
         let mut paid_so_far: i128 = 0;
         for i in 0..n {
             if i == largest_idx {
@@ -702,27 +697,52 @@ impl TreeEscrow {
             .get(&DataKey::TreeFunding(tree_id))
     }
 
+    // ── QR hash (#496) ────────────────────────────────────────────────────────
+
+    /// Admin stores the SHA-256 of the physical QR label payload for `tree_id`.
+    /// The hash can be verified against a scanned label to prove authenticity.
+    pub fn register_qr_hash(env: Env, tree_id: u64, qr_hash: BytesN<32>) {
+        let (admin, _tree_token, _decimals) = Self::admin_tree(&env);
+        admin.require_auth();
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::QrHash(tree_id), &qr_hash);
+
+        env.events()
+            .publish((symbol_short!("qrhash"), tree_id), qr_hash);
+    }
+
+    /// Returns the stored QR hash for `tree_id`, or None if not yet registered.
+    pub fn get_qr_hash(env: Env, tree_id: u64) -> Option<BytesN<32>> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::QrHash(tree_id))
+    }
+
     // ── internal helpers ──────────────────────────────────────────────────────
 
     fn admin_tree(env: &Env) -> (Address, Address, u32) {
         env.storage()
             .instance()
             .get(&DataKey::AdminTree)
-            .expect("contract not initialized")
+            .unwrap_or_else(|| panic_with_error!(env, HarvestaError::NotInitialized))
     }
 
     fn survival_threshold(env: &Env) -> u32 {
         env.storage()
             .instance()
             .get(&DataKey::SurvivalThreshold)
-            .expect("contract not initialized")
+            .unwrap_or_else(|| panic_with_error!(env, HarvestaError::NotInitialized))
     }
 
-    fn compute_token_unit(decimals: u32) -> i128 {
+    fn compute_token_unit(env: &Env, decimals: u32) -> i128 {
         let mut unit = 1i128;
         let mut i = 0u32;
         while i < decimals {
-            unit = unit.checked_mul(10).expect("token unit overflow");
+            unit = unit
+                .checked_mul(10)
+                .unwrap_or_else(|| panic_with_error!(env, HarvestaError::TokenUnitOverflow));
             i += 1;
         }
         unit
@@ -806,7 +826,7 @@ mod tests {
     // ── initialise ────────────────────────────────────────────────────────────
 
     #[test]
-    #[should_panic(expected = "contract must be tree token admin")]
+    #[should_panic(expected = "Error(Contract, #8)")]
     fn test_initialize_requires_contract_as_tree_token_admin() {
         let env = Env::default();
         env.mock_all_auths();
@@ -824,7 +844,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "survival threshold must be 0..=100")]
+    #[should_panic(expected = "Error(Contract, #21)")]
     fn test_initialize_rejects_threshold_above_100() {
         let env = Env::default();
         env.mock_all_auths();
@@ -879,7 +899,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "6-month survival period not yet elapsed")]
+    #[should_panic(expected = "Error(Contract, #24)")]
     fn test_survival_too_early_rejected() {
         let ctx = setup();
         ctx.client
@@ -892,7 +912,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "survival rate below minimum")]
+    #[should_panic(expected = "Error(Contract, #23)")]
     fn test_survival_below_threshold_rejected() {
         let ctx = setup();
         ctx.client
@@ -908,7 +928,6 @@ mod tests {
 
     #[test]
     fn test_threshold_is_configurable_at_init() {
-        // Lower the threshold to 50 — survival of 55% must now succeed.
         let ctx = setup_with_threshold(50);
         ctx.client
             .deposit(&ctx.donor, &ctx.farmer, &ctx.token, &10_000, &42);
@@ -926,7 +945,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "planting already verified")]
+    #[should_panic(expected = "Error(Contract, #18)")]
     fn test_double_planting_rejected() {
         let ctx = setup();
         ctx.client
@@ -950,7 +969,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "cannot refund after planting")]
+    #[should_panic(expected = "Error(Contract, #20)")]
     fn test_refund_after_planting_rejected() {
         let ctx = setup();
         ctx.client
@@ -961,7 +980,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "tree count must be positive")]
+    #[should_panic(expected = "Error(Contract, #10)")]
     fn test_deposit_rejects_zero_tree_count() {
         let ctx = setup();
         ctx.client
@@ -983,7 +1002,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "verified tree count exceeds donation")]
+    #[should_panic(expected = "Error(Contract, #12)")]
     fn test_verified_tree_count_cannot_exceed_donation() {
         let ctx = setup();
         ctx.client
@@ -1002,10 +1021,12 @@ mod tests {
             BatchSlot {
                 farmer: f1.clone(),
                 amount: 1_500,
+                gift_recipient: None,
             },
             BatchSlot {
                 farmer: f2.clone(),
                 amount: 2_500,
+                gift_recipient: None,
             },
         ];
         ctx.client.batch_deposit(&ctx.donor, &ctx.token, &slots);
@@ -1031,7 +1052,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "unauthorized oracle")]
+    #[should_panic(expected = "Error(Contract, #26)")]
     fn test_submit_survival_report_rejects_unauthorized_caller() {
         let ctx = setup();
         let impostor = Address::generate(&ctx.env);
@@ -1039,7 +1060,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "survival_rate must be between 0 and 100")]
+    #[should_panic(expected = "Error(Contract, #22)")]
     fn test_submit_survival_report_rejects_above_100() {
         let ctx = setup();
         ctx.client.submit_survival_report(&ctx.oracle, &7, &101);
@@ -1077,8 +1098,6 @@ mod tests {
         let ctx = setup();
         let a = Address::generate(&ctx.env);
         let b = Address::generate(&ctx.env);
-        // 4_000 and 6_000 → 10_000 pool. Releasing the full pool yields exact
-        // contribution-sized payouts (no rounding).
         register_and_contribute(&ctx, 1, &[(a.clone(), 4_000), (b.clone(), 6_000)]);
 
         let funding = ctx.client.get_tree_funding(&1).unwrap();
@@ -1105,8 +1124,6 @@ mod tests {
         let a = Address::generate(&ctx.env);
         let b = Address::generate(&ctx.env);
         let c = Address::generate(&ctx.env);
-        // Pool 301 (100 + 100 + 101). Pay out 100 → integer shares are
-        // 33, 33, 33 = 99; the 1-unit remainder goes to c (the largest).
         register_and_contribute(
             &ctx,
             2,
@@ -1124,7 +1141,6 @@ mod tests {
         assert_eq!(balance(&ctx.env, &ctx.token, &b) - pre_b, 33);
         assert_eq!(balance(&ctx.env, &ctx.token, &c) - pre_c, 34);
 
-        // Tree is still Open because only 100 of 301 has been released.
         let f = ctx.client.get_tree_funding(&2).unwrap();
         assert_eq!(f.status, TreeFundingStatus::Open);
         assert_eq!(f.released, 100);
@@ -1145,19 +1161,18 @@ mod tests {
 
     #[test]
     fn test_cofund_partial_release_then_full_release() {
-        // 75% / 25% tranche-style payout across two contributors.
         let ctx = setup();
         let a = Address::generate(&ctx.env);
         let b = Address::generate(&ctx.env);
         register_and_contribute(&ctx, 8, &[(a.clone(), 4_000), (b.clone(), 6_000)]);
         ctx.client.submit_survival_report(&ctx.oracle, &8, &80);
 
-        ctx.client.release_proportional(&8, &7_500); // Tranche 1
+        ctx.client.release_proportional(&8, &7_500);
         let f = ctx.client.get_tree_funding(&8).unwrap();
         assert_eq!(f.released, 7_500);
         assert_eq!(f.status, TreeFundingStatus::Open);
 
-        ctx.client.release_proportional(&8, &2_500); // Tranche 2
+        ctx.client.release_proportional(&8, &2_500);
         assert_eq!(
             ctx.client.get_tree_funding(&8).unwrap().status,
             TreeFundingStatus::Released
@@ -1165,7 +1180,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "invalid payout amount")]
+    #[should_panic(expected = "Error(Contract, #13)")]
     fn test_cofund_release_exceeding_remaining_rejected() {
         let ctx = setup();
         let a = Address::generate(&ctx.env);
@@ -1191,7 +1206,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "tree not registered")]
+    #[should_panic(expected = "Error(Contract, #31)")]
     fn test_cofund_contribute_before_register_rejected() {
         let ctx = setup();
         let a = Address::generate(&ctx.env);
@@ -1200,7 +1215,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "no oracle report for tree")]
+    #[should_panic(expected = "Error(Contract, #27)")]
     fn test_cofund_release_without_oracle_report_rejected() {
         let ctx = setup();
         let a = Address::generate(&ctx.env);
@@ -1209,7 +1224,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "survival rate below minimum")]
+    #[should_panic(expected = "Error(Contract, #23)")]
     fn test_cofund_release_below_threshold_rejected() {
         let ctx = setup();
         let a = Address::generate(&ctx.env);
@@ -1219,7 +1234,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "tree not open for release")]
+    #[should_panic(expected = "Error(Contract, #33)")]
     fn test_cofund_release_after_full_payout_rejected() {
         let ctx = setup();
         let a = Address::generate(&ctx.env);
@@ -1227,5 +1242,36 @@ mod tests {
         ctx.client.submit_survival_report(&ctx.oracle, &7, &80);
         ctx.client.release_proportional(&7, &1_000);
         ctx.client.release_proportional(&7, &1);
+    }
+
+    // ── QR hash (#496) ────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_register_and_get_qr_hash() {
+        let ctx = setup();
+        let hash = proof(&ctx.env, 42);
+
+        assert!(ctx.client.get_qr_hash(&1).is_none());
+        ctx.client.register_qr_hash(&1, &hash);
+        assert_eq!(ctx.client.get_qr_hash(&1).unwrap(), hash);
+    }
+
+    #[test]
+    fn test_qr_hash_is_overwritable() {
+        let ctx = setup();
+        ctx.client.register_qr_hash(&1, &proof(&ctx.env, 1));
+        ctx.client.register_qr_hash(&1, &proof(&ctx.env, 2));
+        assert_eq!(ctx.client.get_qr_hash(&1).unwrap(), proof(&ctx.env, 2));
+    }
+
+    #[test]
+    fn test_qr_hash_independent_per_tree_id() {
+        let ctx = setup();
+        ctx.client.register_qr_hash(&10, &proof(&ctx.env, 10));
+        ctx.client.register_qr_hash(&20, &proof(&ctx.env, 20));
+
+        assert_eq!(ctx.client.get_qr_hash(&10).unwrap(), proof(&ctx.env, 10));
+        assert_eq!(ctx.client.get_qr_hash(&20).unwrap(), proof(&ctx.env, 20));
+        assert!(ctx.client.get_qr_hash(&30).is_none());
     }
 }

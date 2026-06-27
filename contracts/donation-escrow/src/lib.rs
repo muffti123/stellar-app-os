@@ -1,8 +1,10 @@
 #![no_std]
 
 use soroban_sdk::{
-    contract, contractimpl, contracttype, symbol_short, token, Address, Env, IntoVal, Vec,
+    contract, contractimpl, contracttype, panic_with_error, symbol_short, token, Address, Env,
+    IntoVal, Vec,
 };
+use harvesta_errors::HarvestaError;
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -54,7 +56,7 @@ impl DonationEscrow {
     /// Initialize contract
     pub fn initialize(env: Env, admin: Address, xlm_token: Address, usdc_token: Address) {
         if env.storage().instance().has(&symbol_short!("ADMIN")) {
-            panic!("already initialized");
+            panic_with_error!(&env, HarvestaError::AlreadyInitialized);
         }
 
         env.storage()
@@ -80,21 +82,21 @@ impl DonationEscrow {
         donor.require_auth();
 
         if amount <= 0 {
-            panic!("amount must be positive");
+            panic_with_error!(&env, HarvestaError::AmountMustBePositive);
         }
 
         if tree_count == 0 || tree_count > MAX_TREES {
-            panic!("tree_count must be between 1 and 50");
+            panic_with_error!(&env, HarvestaError::TreeCountMustBePositive);
         }
 
         let (xlm, usdc): (Address, Address) = env
             .storage()
             .instance()
             .get(&symbol_short!("TOKENS"))
-            .expect("not initialized");
+            .unwrap_or_else(|| panic_with_error!(&env, HarvestaError::NotInitialized));
 
         if token != xlm && token != usdc {
-            panic!("unsupported token");
+            panic_with_error!(&env, HarvestaError::UnsupportedToken);
         }
 
         let (batch_id, seq): (u32, u64) = env
@@ -165,10 +167,14 @@ impl DonationEscrow {
 
             let key = Self::donation_key(&env, seq);
 
-            let mut rec: DonationRecord = env.storage().persistent().get(&key).expect("not found");
+            let mut rec: DonationRecord = env
+                .storage()
+                .persistent()
+                .get(&key)
+                .unwrap_or_else(|| panic_with_error!(&env, HarvestaError::EscrowNotFound));
 
             if rec.status != DonationStatus::Pending {
-                panic!("already processed");
+                panic_with_error!(&env, HarvestaError::AlreadyProcessed);
             }
 
             token::Client::new(&env, &rec.token).transfer(
@@ -192,10 +198,14 @@ impl DonationEscrow {
 
         let key = Self::donation_key(&env, seq);
 
-        let mut rec: DonationRecord = env.storage().persistent().get(&key).expect("not found");
+        let mut rec: DonationRecord = env
+            .storage()
+            .persistent()
+            .get(&key)
+            .unwrap_or_else(|| panic_with_error!(&env, HarvestaError::EscrowNotFound));
 
         if rec.status != DonationStatus::Pending {
-            panic!("already processed");
+            panic_with_error!(&env, HarvestaError::AlreadyProcessed);
         }
 
         token::Client::new(&env, &rec.token).transfer(
@@ -245,20 +255,20 @@ impl DonationEscrow {
         donor.require_auth();
 
         if amount_per_interval <= 0 {
-            panic!("amount_per_interval must be positive");
+            panic_with_error!(&env, HarvestaError::AmountPerIntervalMustBePositive);
         }
         if interval_seconds == 0 {
-            panic!("interval_seconds must be positive");
+            panic_with_error!(&env, HarvestaError::IntervalSecondsMustBePositive);
         }
 
         let (xlm, usdc): (Address, Address) = env
             .storage()
             .instance()
             .get(&symbol_short!("TOKENS"))
-            .expect("not initialized");
+            .unwrap_or_else(|| panic_with_error!(&env, HarvestaError::NotInitialized));
 
         if token != xlm && token != usdc {
-            panic!("unsupported token");
+            panic_with_error!(&env, HarvestaError::UnsupportedToken);
         }
 
         let id: u64 = env
@@ -303,21 +313,21 @@ impl DonationEscrow {
             .storage()
             .persistent()
             .get(&key)
-            .expect("recurring donation not found");
+            .unwrap_or_else(|| panic_with_error!(&env, HarvestaError::RecurringDonationNotFound));
 
         if rec.cancelled {
-            panic!("CancelledDonation");
+            panic_with_error!(&env, HarvestaError::DonationCancelled);
         }
 
         if env.ledger().timestamp() < rec.next_release {
-            panic!("IntervalNotElapsed");
+            panic_with_error!(&env, HarvestaError::IntervalNotElapsed);
         }
 
         let project: Address = env
             .storage()
             .instance()
             .get(&Self::project_key(&env, rec.project_id))
-            .expect("project not registered");
+            .unwrap_or_else(|| panic_with_error!(&env, HarvestaError::ProjectNotRegistered));
 
         token::Client::new(&env, &rec.token).transfer(
             &env.current_contract_address(),
@@ -351,14 +361,14 @@ impl DonationEscrow {
             .storage()
             .persistent()
             .get(&key)
-            .expect("recurring donation not found");
+            .unwrap_or_else(|| panic_with_error!(&env, HarvestaError::RecurringDonationNotFound));
 
         if rec.donor != donor {
-            panic!("not the donor");
+            panic_with_error!(&env, HarvestaError::NotDonor);
         }
 
         if rec.cancelled {
-            panic!("already cancelled");
+            panic_with_error!(&env, HarvestaError::DonationAlreadyCancelled);
         }
 
         rec.cancelled = true;
@@ -412,7 +422,7 @@ impl DonationEscrow {
             .storage()
             .instance()
             .get(&symbol_short!("ADMIN"))
-            .expect("not initialized");
+            .unwrap_or_else(|| panic_with_error!(env, HarvestaError::NotInitialized));
 
         admin.require_auth();
     }
@@ -536,7 +546,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "IntervalNotElapsed")]
+    #[should_panic(expected = "Error(Contract, #75)")]
     fn test_process_recurring_fails_before_interval() {
         let (_env, _admin, donor, xlm, _usdc, project_id, client) = setup_recurring_env();
 
@@ -565,7 +575,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "CancelledDonation")]
+    #[should_panic(expected = "Error(Contract, #74)")]
     fn test_process_recurring_on_cancelled_panics() {
         let (env, _admin, donor, xlm, _usdc, project_id, client) = setup_recurring_env();
 
@@ -577,7 +587,7 @@ mod tests {
         // Advance time past interval
         env.ledger().with_mut(|l| l.timestamp += interval + 1);
 
-        // Should panic with CancelledDonation
+        // Should panic with DonationCancelled
         client.process_recurring(&id);
     }
 
