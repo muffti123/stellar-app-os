@@ -330,6 +330,10 @@ impl TreeEscrow {
     ) {
         donor.require_auth();
 
+        if Self::is_paused(&env) {
+            panic!("contract is paused - deposits are not allowed");
+        }
+
         if amount <= 0 {
             panic_with_error!(&env, HarvestaError::AmountMustBePositive);
         }
@@ -390,6 +394,10 @@ impl TreeEscrow {
     /// Each slot represents 1 tree on a small area (0.01 hectares for density calculation).
     pub fn batch_deposit(env: Env, donor: Address, token: Address, slots: Vec<BatchSlot>) {
         donor.require_auth();
+
+        if Self::is_paused(&env) {
+            panic!("contract is paused - deposits are not allowed");
+        }
 
         let n = slots.len();
         if n == 0 {
@@ -852,6 +860,10 @@ impl TreeEscrow {
     pub fn contribute(env: Env, funder: Address, tree_id: u64, amount: i128) {
         funder.require_auth();
 
+        if Self::is_paused(&env) {
+            panic!("contract is paused - contributions are not allowed");
+        }
+
         if amount <= 0 {
             panic_with_error!(&env, HarvestaError::AmountMustBePositive);
         }
@@ -1226,6 +1238,13 @@ impl TreeEscrow {
             }
         }
         false
+    }
+
+    fn is_paused(env: &Env) -> bool {
+        env.storage()
+            .instance()
+            .get(&DataKey::Paused)
+            .unwrap_or(false)
     }
 
     fn compute_token_unit(decimals: u32) -> i128 {
