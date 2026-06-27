@@ -41,6 +41,10 @@ Contracts panic with a descriptive string on invalid input. The Stellar SDK surf
 | `"area hectares must be positive"` — `area_hectares ≤ 0` |
 | `"survival not yet verified"` — Attempting to call 1-year milestone before survival check |
 | `"1-year milestone period not yet elapsed"` — Called before 1 year elapsed since planting |
+| `"rating must be between 1 and 5"` — Rating outside valid range |
+| `"can only rate after escrow is completed"` — Rating before job completion |
+| `"only the original donor can rate the planter"` — Non-donor attempting to rate |
+| `"sponsor has already rated this planter"` — Duplicate rating attempt |
 
 ---
 
@@ -54,6 +58,8 @@ State machine: `Funded → Planted → Survived → Completed` (or `Funded → R
 - Tranche 3 (30%) at 1-year milestone
 
 **Minimum Planting Density Rule (#514):** For jobs with `area_hectares` ≥ `job_size_threshold`, the contract enforces a minimum planting density of `min_density` trees per hectare. Small jobs below the threshold are exempt from density rules.
+
+**Planter Rating System (#483):** After job completion, sponsors can rate planters (1-5 stars). Ratings are stored on-chain and aggregated into a reputation score (0-100) to track planter performance over time.
 
 ### `initialize`
 
@@ -282,9 +288,67 @@ Read-only. Returns the full escrow record for a farmer.
 
 ```ts
 const record = await client.get_record({ farmer: farmerAddress });
-// record.status: "Funded" | "Planted" | "Completed" | "Refunded"
+// record.status: "Funded" | "Planted" | "Survived" | "Completed" | "Refunded"
 // record.total_amount: bigint
 // record.released: bigint
+```
+
+---
+
+### `rate_planter`
+
+Sponsor rates a planter after job completion. Rating must be 1-5 stars. Only callable by the original donor after escrow is completed. Each sponsor can only rate a specific planter once per escrow.
+
+**Auth:** sponsor (caller-auth)
+
+| Parameter | Type | Description |
+|---|---|---|
+| `sponsor` | `Address` | Sponsor/donor providing the rating |
+| `farmer` | `Address` | Planter being rated |
+| `rating` | `u32` | Rating from 1-5 stars |
+
+**Returns:** `void`
+
+**Events emitted:** `Rated(farmer) → (sponsor, rating)`
+
+**Errors:**
+- `"rating must be between 1 and 5"` — Rating outside valid range
+- `"no escrow for farmer"` — No escrow record found
+- `"only the original donor can rate the planter"` — Caller is not the donor
+- `"can only rate after escrow is completed"` — Escrow not in Completed state
+- `"sponsor has already rated this planter"` — Duplicate rating attempt
+
+```ts
+await client.rate_planter({
+  sponsor: donorAddress,
+  farmer: farmerAddress,
+  rating: 5, // 1-5 stars
+});
+```
+
+---
+
+### `get_planter_reputation`
+
+Query the aggregated reputation score for a planter.
+
+**Auth:** public (no auth required)
+
+| Parameter | Type | Description |
+|---|---|---|
+| `farmer` | `Address` | Planter address to look up |
+
+**Returns:** `Option<PlanterReputation>` with fields:
+- `total_ratings: u32` — Number of ratings received
+- `sum_ratings: u128` — Sum of all ratings (1-5 each)
+- `average_rating: u32` — Scaled average (0-100, where 100 = 5 stars)
+
+```ts
+const reputation = await client.get_planter_reputation({ farmer: farmerAddress });
+if (reputation) {
+  console.log(`Average rating: ${reputation.average_rating / 20} stars`);
+  console.log(`Total ratings: ${reputation.total_ratings}`);
+}
 ```
 
 ---

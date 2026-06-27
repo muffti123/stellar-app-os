@@ -135,6 +135,26 @@ pub struct TreeFunding {
     pub status: TreeFundingStatus,
 }
 
+/// Sponsor rating for a planter (1-5 stars)
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct PlanterRating {
+    pub sponsor: Address,
+    pub farmer: Address,
+    pub rating: u32, // 1-5 stars
+    pub rated_at: u64,
+}
+
+/// Aggregated reputation score for a planter
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct PlanterReputation {
+    pub farmer: Address,
+    pub total_ratings: u32,
+    pub sum_ratings: u128, // Sum of all ratings (1-5 each)
+    pub average_rating: u32, // Calculated as sum / total (scaled to 0-100)
+}
+
 // ── Storage keys ──────────────────────────────────────────────────────────────
 
 #[contracttype]
@@ -155,6 +175,10 @@ enum DataKey {
     OracleReport(u64),
     /// Per-tree co-funded escrow record
     TreeFunding(u64),
+    /// Per-farmer aggregated reputation
+    PlanterReputation(Address),
+    /// Per-sponsor rating for a specific farmer (prevents duplicate ratings)
+    SponsorRating(Address, Address), // (sponsor, farmer)
 }
 
 // ── Contract ──────────────────────────────────────────────────────────────────
@@ -575,6 +599,80 @@ impl TreeEscrow {
 
     pub fn get_record(env: Env, farmer: Address) -> Option<EscrowRecord> {
         env.storage().persistent().get(&DataKey::Escrow(farmer))
+    }
+
+    // ── Planter rating system (#483) ─────────────────────────────────────────
+
+    /// Sponsor rates a planter after job completion. Rating must be 1-5 stars.
+    /// Only callable by the original donor after escrow is completed.
+    pub fn rate_planter(
+        env: Env,
+        sponsor: Address,
+        farmer: Address,
+        rating: u32,
+    ) {
+        sponsor.require_auth();
+
+        if rating < 1 || rating > 5 {
+            panic!("rating must be between 1 and 5");
+        }
+
+        // Check if escrow exists and is completed
+        let escrow_key = DataKey::Escrow(farmer.clone());
+        let rec: EscrowRecord = env
+            .storage()
+            .persistent()
+            .get(&escrow_key)
+            .expect("no escrow for farmer");
+
+        if rec.donor != sponsor {
+            panic!("only the original donor can rate the planter");
+        }
+
+        if rec.status != EscrowStatus::Completed {
+            panic!("can only rate after escrow is completed");
+        }
+
+        // Prevent duplicate ratings from same sponsor
+        let rating_key = DataKey::SponsorRating(sponsor.clone(), farmer.clone());
+        if env.storage().persistent().has(&rating_key) {
+            panic!("sponsor has already rated this planter");
+        }
+
+        // Store the individual rating
+        let rating_record = PlanterRating {
+            sponsor: sponsor.clone(),
+            farmer: farmer.clone(),
+            rating,
+            rated_at: env.ledger().timestamp(),
+        };
+        env.storage().persistent().set(&rating_key, &rating_record);
+
+        // Update aggregated reputation
+        let rep_key = DataKey::PlanterReputation(farmer.clone());
+        let mut rep: PlanterReputation = env
+            .storage()
+            .persistent()
+            .get(&rep_key)
+            .unwrap_or(PlanterReputation {
+                farmer: farmer.clone(),
+                total_ratings: 0,
+                sum_ratings: 0,
+                average_rating: 0,
+            });
+
+        rep.total_ratings += 1;
+        rep.sum_ratings += rating as u128;
+        rep.average_rating = (rep.sum_ratings * 20) / rep.total_ratings as u128; // Scale to 0-100 (5 stars * 20 = 100)
+
+        env.storage().persistent().set(&rep_key, &rep);
+
+        env.events()
+            .publish((symbol_short!("rated"), farmer), (sponsor, rating));
+    }
+
+    pub fn get_planter_reputation(env: Env, farmer: Address) -> Option<PlanterReputation> {
+        env.storage().persistent().get(&DataKey::PlanterReputation(farmer))
     }
 
     // ── Oracle survival reports (#394) ────────────────────────────────────────
@@ -1194,6 +1292,209 @@ mod tests {
             .verify_year_milestone(&ctx.farmer, &proof(&ctx.env, 3));
         ctx.client
             .verify_year_milestone(&ctx.farmer, &proof(&ctx.env, 4));
+    }
+
+    // ── Planter rating tests (#483) ───────────────────────────────────────────
+
+    #[test]
+    fn test_rate_planter_after_completion() {
+        let ctx = setup();
+        ctx.client
+            .deposit(&ctx.donor, &ctx.farmer, &ctx.token, &10_000, &42, &5);
+        ctx.client
+            .verify_planting(&ctx.farmer, &proof(&ctx.env, 1), &42);
+        ctx.env
+            .ledger()
+            .with_mut(|l| l.timestamp += SIX_MONTHS_SECS + 1);
+        ctx.client
+            .verify_survival(&ctx.farmer, &proof(&ctx.env, 2), &70);
+        ctx.env
+            .ledger()
+            .with_mut(|l| l.timestamp += ONE_YEAR_SECS - SIX_MONTHS_SECS + 1);
+        ctx.client
+            .verify_year_milestone(&ctx.farmer, &proof(&ctx.env, 3));
+
+        ctx.client.rate_planter(&ctx.donor, &ctx.farmer, &5);
+
+        let rep = ctx.client.get_planter_reputation(&ctx.farmer).unwrap();
+        assert_eq!(rep.total_ratings, 1);
+        assert_eq!(rep.sum_ratings, 5);
+        assert_eq!(rep.average_rating, 100); // 5 * 20 = 100
+    }
+
+    #[test]
+    #[should_panic(expected = "rating must be between 1 and 5")]
+    fn test_rating_out_of_range_rejected() {
+        let ctx = setup();
+        ctx.client
+            .deposit(&ctx.donor, &ctx.farmer, &ctx.token, &10_000, &42, &5);
+        ctx.client
+            .verify_planting(&ctx.farmer, &proof(&ctx.env, 1), &42);
+        ctx.env
+            .ledger()
+            .with_mut(|l| l.timestamp += SIX_MONTHS_SECS + 1);
+        ctx.client
+            .verify_survival(&ctx.farmer, &proof(&ctx.env, 2), &70);
+        ctx.env
+            .ledger()
+            .with_mut(|l| l.timestamp += ONE_YEAR_SECS - SIX_MONTHS_SECS + 1);
+        ctx.client
+            .verify_year_milestone(&ctx.farmer, &proof(&ctx.env, 3));
+
+        ctx.client.rate_planter(&ctx.donor, &ctx.farmer, &6);
+    }
+
+    #[test]
+    #[should_panic(expected = "can only rate after escrow is completed")]
+    fn test_rating_before_completion_rejected() {
+        let ctx = setup();
+        ctx.client
+            .deposit(&ctx.donor, &ctx.farmer, &ctx.token, &10_000, &42, &5);
+        ctx.client
+            .verify_planting(&ctx.farmer, &proof(&ctx.env, 1), &42);
+
+        ctx.client.rate_planter(&ctx.donor, &ctx.farmer, &5);
+    }
+
+    #[test]
+    #[should_panic(expected = "only the original donor can rate the planter")]
+    fn test_non_donor_cannot_rate() {
+        let ctx = setup();
+        let impostor = Address::generate(&ctx.env);
+        ctx.client
+            .deposit(&ctx.donor, &ctx.farmer, &ctx.token, &10_000, &42, &5);
+        ctx.client
+            .verify_planting(&ctx.farmer, &proof(&ctx.env, 1), &42);
+        ctx.env
+            .ledger()
+            .with_mut(|l| l.timestamp += SIX_MONTHS_SECS + 1);
+        ctx.client
+            .verify_survival(&ctx.farmer, &proof(&ctx.env, 2), &70);
+        ctx.env
+            .ledger()
+            .with_mut(|l| l.timestamp += ONE_YEAR_SECS - SIX_MONTHS_SECS + 1);
+        ctx.client
+            .verify_year_milestone(&ctx.farmer, &proof(&ctx.env, 3));
+
+        ctx.client.rate_planter(&impostor, &ctx.farmer, &5);
+    }
+
+    #[test]
+    #[should_panic(expected = "sponsor has already rated this planter")]
+    fn test_duplicate_rating_rejected() {
+        let ctx = setup();
+        ctx.client
+            .deposit(&ctx.donor, &ctx.farmer, &ctx.token, &10_000, &42, &5);
+        ctx.client
+            .verify_planting(&ctx.farmer, &proof(&ctx.env, 1), &42);
+        ctx.env
+            .ledger()
+            .with_mut(|l| l.timestamp += SIX_MONTHS_SECS + 1);
+        ctx.client
+            .verify_survival(&ctx.farmer, &proof(&ctx.env, 2), &70);
+        ctx.env
+            .ledger()
+            .with_mut(|l| l.timestamp += ONE_YEAR_SECS - SIX_MONTHS_SECS + 1);
+        ctx.client
+            .verify_year_milestone(&ctx.farmer, &proof(&ctx.env, 3));
+
+        ctx.client.rate_planter(&ctx.donor, &ctx.farmer, &5);
+        ctx.client.rate_planter(&ctx.donor, &ctx.farmer, &4);
+    }
+
+    #[test]
+    fn test_multiple_sponsors_can_rate_same_planter() {
+        let ctx = setup();
+        ctx.client
+            .deposit(&ctx.donor, &ctx.farmer, &ctx.token, &10_000, &42, &5);
+        ctx.client
+            .verify_planting(&ctx.farmer, &proof(&ctx.env, 1), &42);
+        ctx.env
+            .ledger()
+            .with_mut(|l| l.timestamp += SIX_MONTHS_SECS + 1);
+        ctx.client
+            .verify_survival(&ctx.farmer, &proof(&ctx.env, 2), &70);
+        ctx.env
+            .ledger()
+            .with_mut(|l| l.timestamp += ONE_YEAR_SECS - SIX_MONTHS_SECS + 1);
+        ctx.client
+            .verify_year_milestone(&ctx.farmer, &proof(&ctx.env, 3));
+
+        // First sponsor rates
+        ctx.client.rate_planter(&ctx.donor, &ctx.farmer, &5);
+
+        // Create a second escrow with different donor
+        let donor2 = Address::generate(&ctx.env);
+        token::StellarAssetClient::new(&ctx.env, &ctx.token).mint(&donor2, &10_000);
+        let farmer2 = ctx.farmer.clone(); // Same farmer
+        ctx.client
+            .deposit(&donor2, &farmer2, &ctx.token, &10_000, &30, &3);
+        ctx.client
+            .verify_planting(&farmer2, &proof(&ctx.env, 2), &30);
+        ctx.env
+            .ledger()
+            .with_mut(|l| l.timestamp += SIX_MONTHS_SECS + 1);
+        ctx.client
+            .verify_survival(&farmer2, &proof(&ctx.env, 3), &70);
+        ctx.env
+            .ledger()
+            .with_mut(|l| l.timestamp += ONE_YEAR_SECS - SIX_MONTHS_SECS + 1);
+        ctx.client
+            .verify_year_milestone(&farmer2, &proof(&ctx.env, 4));
+
+        // Second sponsor rates
+        ctx.client.rate_planter(&donor2, &farmer2, &4);
+
+        let rep = ctx.client.get_planter_reputation(&ctx.farmer).unwrap();
+        assert_eq!(rep.total_ratings, 2);
+        assert_eq!(rep.sum_ratings, 9); // 5 + 4
+        assert_eq!(rep.average_rating, 90); // (9 * 20) / 2 = 90
+    }
+
+    #[test]
+    fn test_reputation_calculation_with_various_ratings() {
+        let ctx = setup();
+        ctx.client
+            .deposit(&ctx.donor, &ctx.farmer, &ctx.token, &10_000, &42, &5);
+        ctx.client
+            .verify_planting(&ctx.farmer, &proof(&ctx.env, 1), &42);
+        ctx.env
+            .ledger()
+            .with_mut(|l| l.timestamp += SIX_MONTHS_SECS + 1);
+        ctx.client
+            .verify_survival(&ctx.farmer, &proof(&ctx.env, 2), &70);
+        ctx.env
+            .ledger()
+            .with_mut(|l| l.timestamp += ONE_YEAR_SECS - SIX_MONTHS_SECS + 1);
+        ctx.client
+            .verify_year_milestone(&ctx.farmer, &proof(&ctx.env, 3));
+
+        // Add multiple ratings from different sponsors
+        for i in 1..=5 {
+            let donor = Address::generate(&ctx.env);
+            token::StellarAssetClient::new(&ctx.env, &ctx.token).mint(&donor, &10_000);
+            let farmer = ctx.farmer.clone();
+            ctx.client
+                .deposit(&donor, &farmer, &ctx.token, &10_000, &10, &1);
+            ctx.client
+                .verify_planting(&farmer, &proof(&ctx.env, i + 10), &10);
+            ctx.env
+                .ledger()
+                .with_mut(|l| l.timestamp += SIX_MONTHS_SECS + 1);
+            ctx.client
+                .verify_survival(&farmer, &proof(&ctx.env, i + 20), &70);
+            ctx.env
+                .ledger()
+                .with_mut(|l| l.timestamp += ONE_YEAR_SECS - SIX_MONTHS_SECS + 1);
+            ctx.client
+                .verify_year_milestone(&farmer, &proof(&ctx.env, i + 30));
+            ctx.client.rate_planter(&donor, &farmer, i);
+        }
+
+        let rep = ctx.client.get_planter_reputation(&ctx.farmer).unwrap();
+        assert_eq!(rep.total_ratings, 5);
+        assert_eq!(rep.sum_ratings, 15); // 1+2+3+4+5
+        assert_eq!(rep.average_rating, 60); // (15 * 20) / 5 = 60
     }
 
     #[test]
