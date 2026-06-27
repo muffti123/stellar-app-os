@@ -1,10 +1,9 @@
 'use client';
 
-import Link from 'next/link';
 import { type JSX, useState } from 'react';
+import Link from 'next/link';
 import { Button } from '@/components/atoms/Button';
 import { Text } from '@/components/atoms/Text';
-import { Badge } from '@/components/atoms/Badge';
 import { Counter } from '@/components/atoms/Counter';
 import { OnboardingTour } from '@/components/organisms/OnboardingTour/OnboardingTour';
 import SocialShareButtons from '@/components/SocialShareButtons';
@@ -15,7 +14,14 @@ import {
   CardDescription,
   CardContent,
 } from '@/components/molecules/Card';
-import { OnboardingTour } from '@/components/organisms/OnboardingTour/OnboardingTour';
+import { useToast } from '@/hooks/useToast';
+import { TransactionHistoryModal } from '@/components/ui/TransactionHistoryModal';
+import { useAppTranslation } from '@/hooks/useTranslation';
+import { LandingHero } from '@/components/organisms/LandingHero';
+export default function Home(): JSX.Element {
+  const [showTx, setShowTx] = useState(false);
+  const { addToast } = useToast();
+  const { t } = useAppTranslation();
 
   return (
     <div className="flex min-h-screen flex-col items-center justify-center gap-8 p-8">
@@ -28,12 +34,8 @@ import { OnboardingTour } from '@/components/organisms/OnboardingTour/Onboarding
         </Button>
       </header>
 
-      <div data-tour-id="hero-section" className="flex flex-col items-center gap-4 text-center">
-        <Badge variant="default">{t('home.badge')}</Badge>
-        <Text variant="h1">{t('home.title')}</Text>
-        <Text variant="muted" className="max-w-md">
-          {t('home.subtitle')}
-        </Text>
+      <div data-tour-id="hero-section">
+        <LandingHero />
       </div>
 
       <CardContent className="flex flex-col gap-3">
@@ -117,9 +119,6 @@ import { OnboardingTour } from '@/components/organisms/OnboardingTour/Onboarding
             className="w-full"
           >
             <Link href="/credits/purchase">Purchase Carbon Credits</Link>
-          </Button>
-          <Button asChild variant="outline" size="lg" className="w-full">
-            <Link href="/leaderboard">View Leaderboard</Link>
           </Button>
         </CardContent>
       </Card>

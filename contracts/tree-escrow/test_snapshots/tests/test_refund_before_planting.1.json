@@ -337,6 +337,12 @@
                     },
                     {
                       "key": {
+                        "symbol": "gift_recipient"
+                      },
+                      "val": "void"
+                    },
+                    {
+                      "key": {
                         "symbol": "planted_at"
                       },
                       "val": {
@@ -1655,27 +1661,17 @@
           "v0": {
             "topics": [
               {
-                "symbol": "DonationReceived"
-              },
-              {
-                "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
+                "symbol": "deposit"
               },
               {
                 "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
               }
             ],
             "data": {
-              "vec": [
-                {
-                  "i128": {
-                    "hi": 0,
-                    "lo": 10000
-                  }
-                },
-                {
-                  "address": "CDLDVFKHEZ2RVB3NG4UQA4VPD3TSHV6XMHXMHP2BSGCJ2IIWVTOHGDSG"
-                }
-              ]
+              "i128": {
+                "hi": 0,
+                "lo": 10000
+              }
             }
           }
         }
@@ -1830,10 +1826,7 @@
           "v0": {
             "topics": [
               {
-                "symbol": "DonationRefunded"
-              },
-              {
-                "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
+                "symbol": "refund"
               },
               {
                 "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
@@ -1929,6 +1922,12 @@
                   "val": {
                     "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
                   }
+                },
+                {
+                  "key": {
+                    "symbol": "gift_recipient"
+                  },
+                  "val": "void"
                 },
                 {
                   "key": {

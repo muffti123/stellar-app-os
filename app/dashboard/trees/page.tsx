@@ -25,11 +25,11 @@ function SponsorTreesPageContent() {
   const initialFilters = parseFiltersFromParams(searchParams);
 
   return (
-    <div className="container mx-auto max-w-6xl px-4 py-8">
-      <header className="mb-8">
+    <div className="container mx-auto max-w-6xl px-4 py-6 sm:py-8">
+      <header className="mb-6 sm:mb-8">
         <div className="mb-2 flex items-center gap-2">
           <TreePine className="h-6 w-6 text-stellar-green" aria-hidden />
-          <Text variant="h2" as="h1">
+          <Text variant="h2" as="h1" className="text-2xl sm:text-3xl">
             My Trees
           </Text>
         </div>

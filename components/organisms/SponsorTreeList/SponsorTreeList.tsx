@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { TreePine, MapPin, Leaf } from 'lucide-react';
 import { TreeFilterBar } from '@/components/molecules/TreeFilterBar';
 import { TreeStatusBadge } from '@/components/molecules/TreeStatusBadge';
@@ -93,32 +94,37 @@ export function SponsorTreeList({ initialFilters }: SponsorTreeListProps) {
           ) : (
             <ul className="divide-y" role="list">
               {trees.map((tree) => (
-                <li key={tree.id} className="px-6 py-4">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div className="space-y-1">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <Text className="font-semibold">{tree.treeId}</Text>
-                        <TreeStatusBadge status={tree.status} />
+                <li key={tree.id} className="px-4 py-4 sm:px-6">
+                  <Link
+                    href={`/trees/${tree.id}`}
+                    className="block rounded-lg transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stellar-green"
+                  >
+                    <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between">
+                      <div className="space-y-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Text className="font-semibold">{tree.treeId}</Text>
+                          <TreeStatusBadge status={tree.status} />
+                        </div>
+                        <Text className="text-muted-foreground">{tree.projectName}</Text>
+                        <div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground sm:gap-4">
+                          <span className="inline-flex items-center gap-1">
+                            <Leaf className="h-3.5 w-3.5" aria-hidden />
+                            {tree.species}
+                          </span>
+                          <span className="inline-flex items-center gap-1">
+                            <MapPin className="h-3.5 w-3.5" aria-hidden />
+                            {tree.region}
+                          </span>
+                        </div>
                       </div>
-                      <Text className="text-muted-foreground">{tree.projectName}</Text>
-                      <div className="flex flex-wrap items-center gap-4 text-sm text-muted-foreground">
-                        <span className="inline-flex items-center gap-1">
-                          <Leaf className="h-3.5 w-3.5" aria-hidden />
-                          {tree.species}
-                        </span>
-                        <span className="inline-flex items-center gap-1">
-                          <MapPin className="h-3.5 w-3.5" aria-hidden />
-                          {tree.region}
-                        </span>
+                      <div className="text-left text-sm sm:text-right">
+                        <Text className="font-medium text-stellar-green">
+                          ~{tree.co2OffsetKgPerYear} kg CO₂/yr
+                        </Text>
+                        <Text className="text-muted-foreground">{fmtDate(tree.plantedAt)}</Text>
                       </div>
                     </div>
-                    <div className="text-right text-sm">
-                      <Text className="font-medium text-stellar-green">
-                        ~{tree.co2OffsetKgPerYear} kg CO₂/yr
-                      </Text>
-                      <Text className="text-muted-foreground">{fmtDate(tree.plantedAt)}</Text>
-                    </div>
-                  </div>
+                  </Link>
                 </li>
               ))}
             </ul>
