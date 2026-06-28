@@ -15,6 +15,7 @@ import {
   DollarSign,
   Share2,
   MapPin,
+  Leaf,
 } from 'lucide-react';
 import { Button } from '@/components/atoms/Button';
 import { Text } from '@/components/atoms/Text';
@@ -199,6 +200,15 @@ function DonationConfirmationContent() {
               </div>
             </div>
 
+            {/* Species Info */}
+            <div className="flex items-center justify-between py-1">
+              <div className="flex items-center gap-2 text-sm font-medium text-gray-700">
+                <Leaf className="w-4 h-4 text-stellar-green" />
+                <Text>Species</Text>
+              </div>
+              <Text className="text-sm font-semibold text-gray-800">{state.species}</Text>
+            </div>
+
             {/* Region Breakdown */}
             {regionAllocations.length > 0 && (
               <div className="pt-4 border-t border-gray-100 space-y-3">
@@ -213,7 +223,9 @@ function DonationConfirmationContent() {
                     return (
                       <div key={alloc.regionId} className="flex items-center justify-between py-1">
                         <Text className="text-sm text-gray-600">{region.name}</Text>
-                        <Text className="text-sm font-semibold text-gray-800">{alloc.treeCount} trees</Text>
+                        <Text className="text-sm font-semibold text-gray-800">
+                          {alloc.treeCount} trees
+                        </Text>
                       </div>
                     );
                   })}
