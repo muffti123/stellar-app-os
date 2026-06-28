@@ -7,8 +7,9 @@ import { Text } from '@/components/atoms/Text';
 import { Input } from '@/components/atoms/Input';
 import { Badge } from '@/components/atoms/Badge';
 import { ProgressStepper } from '@/components/molecules/ProgressStepper/ProgressStepper';
+import { ImpactMapClient } from '@/components/organisms/ImpactMap/ImpactMapClient';
 import { useDonationContext } from '@/contexts/DonationContext';
-import { Trees, Mountain, Leaf, Sprout, Plus, Minus } from 'lucide-react';
+import { Trees, Mountain, Leaf, Sprout, Minus, CircleDot, Info } from 'lucide-react';
 import {
   MINIMUM_DONATION,
   TREES_PER_DOLLAR,
@@ -19,6 +20,7 @@ import {
   formatCurrency,
   formatNumber,
 } from '@/lib/constants/donation';
+import { TREE_SPECIES } from '@/lib/constants/species';
 import { MAX_BATCH_TREES } from '@/lib/stellar/transaction';
 import { IMPACT_DATA } from '@/lib/api/impactData';
 import type { RegionAllocation } from '@/lib/types/donor';
@@ -31,6 +33,7 @@ export function DonationAmountStep() {
   const {
     setAmount: persistAmount,
     setTreeCount: persistTreeCount,
+    setSpecies: persistSpecies,
     setIsMonthly: persistIsMonthly,
     setRegionAllocations,
     state,
@@ -73,6 +76,10 @@ export function DonationAmountStep() {
   });
 
   const [treeCount, setTreeCount] = useState<number>(1);
+
+  const [selectedSpecies, setSelectedSpecies] = useState<string>(() => {
+    return state.species || TREE_SPECIES[0].name;
+  });
 
   // Initialize region allocations with default (first region gets all trees)
   const [regionAllocations, setLocalRegionAllocations] = useState<RegionAllocation[]>(() => {
@@ -154,6 +161,7 @@ export function DonationAmountStep() {
     if (isValidAmount && totalAllocatedTrees === treeCount) {
       persistAmount(currentAmount);
       persistTreeCount(treeCount);
+      persistSpecies(selectedSpecies);
       persistIsMonthly(isMonthly);
       setRegionAllocations(regionAllocations);
       router.push('/donate/info');
@@ -185,6 +193,49 @@ export function DonationAmountStep() {
               100% of your gift goes directly to planting local saplings and restoring ecosystems.
               Every dollar brings us closer to a greener planet.
             </Text>
+          </div>
+
+          {/* Species Selection with CO2 Info Card */}
+          <div className="p-5 rounded-xl border border-gray-200 bg-white space-y-4">
+            <div className="flex items-center gap-2">
+              <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-stellar-green/10">
+                <Leaf className="w-4 h-4 text-stellar-green" />
+              </div>
+              <Text className="font-semibold">Choose tree species</Text>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              {TREE_SPECIES.map((s) => {
+                const isSelected = selectedSpecies === s.name;
+                return (
+                  <button
+                    key={s.name}
+                    type="button"
+                    onClick={() => setSelectedSpecies(s.name)}
+                    aria-pressed={isSelected}
+                    className={`relative flex flex-col items-center gap-2 rounded-xl border-2 p-4 text-center transition-all ${
+                      isSelected
+                        ? 'border-stellar-green bg-stellar-green/5 shadow-sm'
+                        : 'border-gray-200 bg-gray-50 hover:border-stellar-green/40 hover:bg-gray-100'
+                    }`}
+                  >
+                    <CircleDot
+                      className={`h-5 w-5 ${isSelected ? 'text-stellar-green' : 'text-gray-400'}`}
+                      aria-hidden="true"
+                    />
+                    <Text className="text-sm font-semibold">{s.name}</Text>
+                    <Text className="text-xs text-muted-foreground">
+                      {s.co2KgPerYear} kg CO₂/yr
+                    </Text>
+                    <Badge
+                      variant={isSelected ? 'default' : 'outline'}
+                      className="text-[10px] px-1.5 py-0"
+                    >
+                      {s.maturityYears}yr maturity
+                    </Badge>
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
           {/* Quick Select Buttons */}
@@ -332,19 +383,28 @@ export function DonationAmountStep() {
             </div>
           </div>
 
-          {/* Region Allocation Selector */}
+          {/* Region Allocation with Interactive Map */}
           <div className="p-4 rounded-lg border border-gray-200 bg-white space-y-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <div className="flex items-center justify-center w-10 h-10 rounded-lg bg-stellar-blue/10">
                   <Mountain className="w-5 h-5 text-stellar-blue" />
                 </div>
-                <Text className="font-medium">Distribute trees across regions</Text>
+                <Text className="font-medium">Pick regions on the map</Text>
               </div>
               <Text variant="muted" className="text-sm">
                 {totalAllocatedTrees}/{treeCount} allocated
               </Text>
             </div>
+
+            {/* Interactive Map */}
+            <div className="h-64 rounded-xl overflow-hidden border border-gray-200">
+              <ImpactMapClient regions={IMPACT_DATA.regions} />
+            </div>
+            <Text variant="muted" className="text-xs flex items-center gap-1">
+              <Info className="h-3 w-3" aria-hidden="true" />
+              Regions shown on the map. Allocate trees to each region below.
+            </Text>
 
             {/* Selected Regions */}
             <div className="space-y-3">
@@ -352,24 +412,36 @@ export function DonationAmountStep() {
                 const region = IMPACT_DATA.regions.find((r) => r.id === alloc.regionId);
                 if (!region) return null;
                 return (
-                  <div key={alloc.regionId} className="flex items-center gap-3 p-3 rounded-lg border border-gray-100 bg-gray-50">
+                  <div
+                    key={alloc.regionId}
+                    className="flex items-center gap-3 p-3 rounded-lg border border-gray-100 bg-gray-50"
+                  >
                     <div className="flex-1">
-                      <Text className="font-medium">{region.name}</Text>
+                      <Text className="font-medium text-sm">{region.name}</Text>
                     </div>
                     <div className="flex items-center gap-2">
                       <button
                         type="button"
-                        onClick={() => updateRegionAllocation(alloc.regionId, Math.max(0, alloc.treeCount - 1))}
+                        onClick={() =>
+                          updateRegionAllocation(alloc.regionId, Math.max(0, alloc.treeCount - 1))
+                        }
                         disabled={alloc.treeCount <= 0}
                         aria-label={`Decrease trees in ${region.name}`}
                         className="w-7 h-7 rounded-full border border-gray-300 flex items-center justify-center text-sm font-bold disabled:opacity-40 hover:bg-white transition-colors"
                       >
                         −
                       </button>
-                      <Text className="w-7 text-center font-semibold tabular-nums text-sm">{alloc.treeCount}</Text>
+                      <Text className="w-7 text-center font-semibold tabular-nums text-sm">
+                        {alloc.treeCount}
+                      </Text>
                       <button
                         type="button"
-                        onClick={() => updateRegionAllocation(alloc.regionId, Math.min(MAX_BATCH_TREES, alloc.treeCount + 1))}
+                        onClick={() =>
+                          updateRegionAllocation(
+                            alloc.regionId,
+                            Math.min(MAX_BATCH_TREES, alloc.treeCount + 1)
+                          )
+                        }
                         disabled={totalAllocatedTrees >= treeCount}
                         aria-label={`Increase trees in ${region.name}`}
                         className="w-7 h-7 rounded-full border border-gray-300 flex items-center justify-center text-sm font-bold disabled:opacity-40 hover:bg-white transition-colors"
@@ -394,22 +466,26 @@ export function DonationAmountStep() {
 
             {/* Add More Regions */}
             <div className="space-y-2">
-              <Text variant="muted" className="text-sm">Add more regions:</Text>
+              <Text variant="muted" className="text-sm">
+                Add more regions:
+              </Text>
               <div className="flex flex-wrap gap-2">
-                {IMPACT_DATA.regions.filter(
-                  (region) => !regionAllocations.some((alloc) => alloc.regionId === region.id)
-                ).map((region) => (
-                  <Button
-                    key={region.id}
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => addRegion(region.id)}
-                    className="text-xs"
-                  >
-                    + {region.name}
-                  </Button>
-                ))}
+                {IMPACT_DATA.regions
+                  .filter(
+                    (region) => !regionAllocations.some((alloc) => alloc.regionId === region.id)
+                  )
+                  .map((region) => (
+                    <Button
+                      key={region.id}
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => addRegion(region.id)}
+                      className="text-xs"
+                    >
+                      + {region.name}
+                    </Button>
+                  ))}
               </div>
             </div>
           </div>
@@ -423,10 +499,9 @@ export function DonationAmountStep() {
               className="w-full h-14 text-lg bg-stellar-green hover:bg-stellar-green/90 disabled:bg-gray-300 disabled:cursor-not-allowed"
               aria-label={`Continue with ${formatCurrency(currentAmount)} donation`}
             >
-              {totalAllocatedTrees !== treeCount 
-                ? `Allocate ${treeCount - totalAllocatedTrees} more trees to continue` 
-                : 'Continue →'
-              }
+              {totalAllocatedTrees !== treeCount
+                ? `Allocate ${treeCount - totalAllocatedTrees} more trees to continue`
+                : 'Continue →'}
             </Button>
           </div>
         </div>
@@ -502,6 +577,43 @@ export function DonationAmountStep() {
                 </div>
               </div>
             </div>
+
+            {/* Species CO2 Info Card */}
+            {(() => {
+              const speciesInfo = TREE_SPECIES.find((s) => s.name === selectedSpecies);
+              if (!speciesInfo) return null;
+              const totalTrees = impact.trees;
+              const totalCo2PerYear = totalTrees * speciesInfo.co2KgPerYear;
+              return (
+                <div className="p-4 rounded-xl border border-stellar-green/20 bg-stellar-green/5 space-y-2">
+                  <div className="flex items-center gap-2">
+                    <Leaf className="h-4 w-4 text-stellar-green" aria-hidden="true" />
+                    <Text className="text-sm font-semibold text-stellar-green">
+                      {speciesInfo.name} CO₂ Impact
+                    </Text>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3 text-sm">
+                    <div>
+                      <Text variant="muted" className="text-xs">
+                        Per tree / year
+                      </Text>
+                      <Text className="font-semibold">{speciesInfo.co2KgPerYear} kg CO₂</Text>
+                    </div>
+                    <div>
+                      <Text variant="muted" className="text-xs">
+                        {totalTrees} trees / year
+                      </Text>
+                      <Text className="font-semibold">
+                        {(totalCo2PerYear / 1000).toFixed(2)} t CO₂
+                      </Text>
+                    </div>
+                  </div>
+                  <Text variant="muted" className="text-xs">
+                    Matures in {speciesInfo.maturityYears} years
+                  </Text>
+                </div>
+              );
+            })()}
 
             {/* Replanting Buffer Fund Breakdown */}
             {safeAmount > 0 && (

@@ -13,6 +13,7 @@ interface DonationContextValue {
   state: DonationFlowState;
   setAmount: (_amount: number) => void;
   setTreeCount: (_count: number) => void;
+  setSpecies: (_species: string) => void;
   setIsMonthly: (_isMonthly: boolean) => void;
   setDonorInfo: (_info: Partial<DonorInfo>) => void;
   setRegionAllocations: (_allocations: RegionAllocation[]) => void;
@@ -33,6 +34,10 @@ export function DonationProvider({ children }: { children: ReactNode }) {
 
   const setTreeCount = useCallback((treeCount: number) => {
     setState((prev) => ({ ...prev, treeCount }));
+  }, []);
+
+  const setSpecies = useCallback((species: string) => {
+    setState((prev) => ({ ...prev, species }));
   }, []);
 
   const setIsMonthly = useCallback((isMonthly: boolean) => {
@@ -59,8 +64,28 @@ export function DonationProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const value = useMemo(
-    () => ({ state, setAmount, setTreeCount, setIsMonthly, setDonorInfo, setRegionAllocations, setGift, resetFlow }),
-    [state, setAmount, setTreeCount, setIsMonthly, setDonorInfo, setRegionAllocations, setGift, resetFlow]
+    () => ({
+      state,
+      setAmount,
+      setTreeCount,
+      setSpecies,
+      setIsMonthly,
+      setDonorInfo,
+      setRegionAllocations,
+      setGift,
+      resetFlow,
+    }),
+    [
+      state,
+      setAmount,
+      setTreeCount,
+      setSpecies,
+      setIsMonthly,
+      setDonorInfo,
+      setRegionAllocations,
+      setGift,
+      resetFlow,
+    ]
   );
 
   return <DonationContext.Provider value={value}>{children}</DonationContext.Provider>;
