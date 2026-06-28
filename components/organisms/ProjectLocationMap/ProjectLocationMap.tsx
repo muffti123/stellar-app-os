@@ -239,7 +239,8 @@ export function ProjectLocationMap({
       satelliteLayerRef.current = null;
       activeLayerRef.current = null;
     };
-  }, [lat, lng, locationLabel, projectName, viewMode]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lat, lng]);
 
   useEffect(() => {
     const map = mapInstanceRef.current;
@@ -263,19 +264,29 @@ export function ProjectLocationMap({
   }, [viewMode]);
 
   useEffect(() => {
-    if (!mapInstanceRef.current) {
-      return;
-    }
+    const map = mapInstanceRef.current;
+    const container = mapContainerRef.current;
+    if (!map || !container) return;
+    map.invalidateSize();
+  }, [mapStatus]);
 
+  // Update view when coordinates change
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (!map) return;
+    map.setView([lat, lng], DEFAULT_ZOOM);
+  }, [lat, lng]);
+
+  // Invalidate map size on window resize
+  useEffect(() => {
     const handleResize = (): void => {
       mapInstanceRef.current?.invalidateSize();
     };
-
     window.addEventListener('resize', handleResize);
     return () => {
       window.removeEventListener('resize', handleResize);
     };
-  }, [mapStatus]);
+  }, []);
 
   const latitudeText = formatCoordinate(lat, 'N', 'S');
   const longitudeText = formatCoordinate(lng, 'E', 'W');

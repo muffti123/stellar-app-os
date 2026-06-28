@@ -11,6 +11,7 @@ interface TreeTxRow {
 }
 
 export class TreeStatusPoller {
+  private lastCreatedAt: string | null = null;
   private lastTxHash: string | null = null;
   private pollIntervalMs: number;
 
@@ -30,12 +31,14 @@ export class TreeStatusPoller {
     let sql: string;
     const params: unknown[] = [];
 
-    if (this.lastTxHash) {
+    if (this.lastTxHash && this.lastCreatedAt) {
       sql = `SELECT tx_hash, created_at, tx_type, amount, source_account, destination
              FROM indexed_transactions
-             WHERE tx_type IN (${placeholders}) AND tx_hash > $${values.length + 1}
+             WHERE tx_type IN (${placeholders})
+               AND (created_at > $${values.length + 1}
+                 OR (created_at = $${values.length + 1} AND tx_hash > $${values.length + 2}))
              ORDER BY created_at ASC, tx_hash ASC`;
-      params.push(...values, this.lastTxHash);
+      params.push(...values, this.lastCreatedAt, this.lastTxHash);
     } else {
       sql = `SELECT tx_hash, created_at, tx_type, amount, source_account, destination
              FROM indexed_transactions
@@ -51,6 +54,7 @@ export class TreeStatusPoller {
     if (rows.length === 0) return [];
 
     this.lastTxHash = rows[rows.length - 1].tx_hash;
+    this.lastCreatedAt = rows[rows.length - 1].created_at;
 
     const events: TreeStatusEvent[] = [];
 

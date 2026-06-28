@@ -6,7 +6,7 @@ import type { RegionMarker } from '@/lib/api/impactData';
 import type { Tree, TreeStatus } from '@/lib/types/tree';
 import 'leaflet/dist/leaflet.css';
 
-interface ImpactMapProps {
+export interface ImpactMapProps {
   regions: RegionMarker[];
   trees?: Tree[];
 }
@@ -16,25 +16,26 @@ function radiusForTrees(trees: number): number {
 }
 
 function colorForStatus(status: TreeStatus): { fill: string; stroke: string } {
-  const colors: Record<TreeStatus, { fill: string; stroke: string }> = {
+  const colors: Partial<Record<TreeStatus, { fill: string; stroke: string }>> = {
     funded: { fill: '#94a3b8', stroke: '#64748b' },
     planted: { fill: '#14B6E7', stroke: '#0ea5e9' },
     verified: { fill: '#00B36B', stroke: '#059669' },
     completed: { fill: '#3E1BDB', stroke: '#4f46e5' },
     failed: { fill: '#ef4444', stroke: '#dc2626' },
   };
-  return colors[status];
+  return colors[status] ?? { fill: '#94a3b8', stroke: '#64748b' };
 }
 
 export function ImpactMap({ regions, trees = [] }: ImpactMapProps): JSX.Element {
   useEffect(() => {
-    void import('leaflet').then((L) => {
-      // @ts-expect-error — Leaflet internal
-      delete L.Icon.Default.prototype._getIconUrl;
-      L.Icon.Default.mergeOptions({
-        iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
-        iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
-        shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
+    Promise.resolve().then(() => {
+      import('leaflet').then((L) => {
+        delete (L.Icon.Default.prototype as unknown as Record<string, unknown>)._getIconUrl;
+        L.Icon.Default.mergeOptions({
+          iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
+          iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
+          shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
+        });
       });
     });
   }, []);

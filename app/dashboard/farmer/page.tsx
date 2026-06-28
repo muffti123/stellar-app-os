@@ -3,7 +3,7 @@ import { FarmerDashboard } from '@/components/organisms/FarmerDashboard/FarmerDa
 
 export const metadata: Metadata = {
   title: 'Farmer Dashboard | FarmCredit',
-  description: 'Your earnings, planting history, survival rates, and upcoming assignments.',
+  description: 'Manage your planting activity, view payments, and accept new planting jobs.',
 };
 
 export default function FarmerDashboardPage() {
