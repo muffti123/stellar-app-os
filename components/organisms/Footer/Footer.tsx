@@ -1,5 +1,6 @@
 'use client';
 
+import React from 'react';
 import Link from 'next/link';
 import { NewsletterForm } from '@/components/organisms/Footer/NewsletterForm';
 import { FaXTwitter, FaGithub, FaDiscord } from 'react-icons/fa6';
@@ -16,24 +17,12 @@ interface FooterSection {
   links: FooterLink[];
 }
 
-const aboutSection: FooterSection = {
-  title: 'About',
-  links: [
-    { label: 'About FarmCredit', href: '#about' },
-    { label: 'Blog', href: '/blog' },
-    { label: 'Leaderboard', href: '/leaderboard' },
-    { label: 'Documentation', href: '#docs' },
-  ],
-};
-
-const resourcesSection: FooterSection = {
-  title: 'Resources',
-  links: [
-    { label: 'API Documentation', href: '#api-docs' },
-    { label: 'Developer Guide', href: '#dev-guide' },
-    { label: 'Community', href: '#community' },
-  ],
-};
+interface SocialLink {
+  label: string;
+  href: string;
+  icon: React.ComponentType<{ size?: number; className?: string }>;
+  ariaLabel: string;
+}
 
 function buildFooterSections(t: TFunction): FooterSection[] {
   return [

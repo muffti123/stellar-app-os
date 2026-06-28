@@ -14,7 +14,7 @@ const DEFAULT_FILTERS: TreeFilterState = {
   search: '',
   species: 'all',
   region: 'all',
-  status: 'all',
+  status: 'verified',
 };
 
 /**
@@ -59,7 +59,7 @@ export function ImpactExplorer() {
   return (
     <main className="mx-auto max-w-6xl px-4 py-12">
       <div className="mb-10 text-center">
-        <h1 className="text-4xl font-bold tracking-tight">Our Impact</h1>
+        <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">Our Impact</h1>
         <p className="mt-2 text-muted-foreground">
           Real-time planting activity across FarmCredit-supported regions.
         </p>
@@ -106,13 +106,15 @@ export function ImpactExplorer() {
             : `Showing ${trees.length} ${trees.length === 1 ? 'tree' : 'trees'} on the map`}
       </Text>
 
-      <div className="overflow-hidden rounded-xl border shadow-sm" style={{ height: '480px' }}>
+      <div
+        className="h-[min(70vh,480px)] min-h-[280px] overflow-hidden rounded-xl border shadow-sm sm:h-[480px]"
+      >
         <ImpactMapClient regions={filteredRegions} trees={trees} />
       </div>
 
-      <p className="mt-3 text-center text-xs text-muted-foreground">
-        Large circles show region-level aggregates. Small markers show individual trees with fuzzed
-        coordinates — exact GPS is never displayed.
+      <p className="mt-3 text-center text-xs text-muted-foreground px-2">
+        Region clusters show verified trees grouped by location. Zoom in to see individual markers
+        with species and CO₂ data — exact GPS is never displayed.
       </p>
     </main>
   );

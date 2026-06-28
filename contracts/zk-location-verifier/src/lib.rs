@@ -31,9 +31,10 @@
 //!   Stored separately because `Option<BytesN<32>>` is not XDR-serialisable in
 //!   a `#[contracttype]` struct in the current SDK version.
 
+use harvesta_errors::HarvestaError;
 use soroban_sdk::{
-    contract, contractimpl, contracttype, symbol_short, xdr::ToXdr, Address, Bytes, BytesN, Env,
-    IntoVal, String,
+    contract, contractimpl, contracttype, panic_with_error, symbol_short, xdr::ToXdr, Address,
+    Bytes, BytesN, Env, IntoVal, String,
 };
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -98,7 +99,7 @@ impl ZkLocationVerifier {
     /// Pass 0 to disable proof caching entirely.
     pub fn initialize_with_cache_ttl(env: Env, admin: Address, cache_ttl_ledgers: u32) {
         if env.storage().instance().has(&symbol_short!("ADMIN")) {
-            panic!("already initialized");
+            panic_with_error!(&env, HarvestaError::AlreadyInitialized);
         }
         env.storage().instance().set(&symbol_short!("ADMIN"), &admin);
         env.storage()
@@ -135,7 +136,7 @@ impl ZkLocationVerifier {
 
         let key = Self::verif_key(&env, &commitment);
         if env.storage().persistent().has(&key) {
-            panic!("commitment already submitted");
+            panic_with_error!(&env, HarvestaError::CommitmentAlreadySubmitted);
         }
 
         let record = LocationVerification {
@@ -191,10 +192,10 @@ impl ZkLocationVerifier {
             .storage()
             .persistent()
             .get(&key)
-            .expect("commitment not found");
+            .unwrap_or_else(|| panic_with_error!(&env, HarvestaError::CommitmentNotFound));
 
         if record.status != VerificationStatus::Pending {
-            panic!("commitment is not in Pending state");
+            panic_with_error!(&env, HarvestaError::CommitmentNotPending);
         }
 
         record.status = VerificationStatus::Approved;
@@ -242,10 +243,10 @@ impl ZkLocationVerifier {
             .storage()
             .persistent()
             .get(&key)
-            .expect("commitment not found");
+            .unwrap_or_else(|| panic_with_error!(&env, HarvestaError::CommitmentNotFound));
 
         if record.status != VerificationStatus::Pending {
-            panic!("commitment is not in Pending state");
+            panic_with_error!(&env, HarvestaError::CommitmentNotPending);
         }
 
         record.status = VerificationStatus::Rejected;
@@ -291,7 +292,7 @@ impl ZkLocationVerifier {
             .storage()
             .instance()
             .get(&symbol_short!("ADMIN"))
-            .expect("contract not initialized");
+            .unwrap_or_else(|| panic_with_error!(env, HarvestaError::NotInitialized));
         admin.require_auth();
     }
 
@@ -338,7 +339,7 @@ impl ZkLocationVerifier {
                 return;
             }
         }
-        panic!("region_geohash is outside the approved Northern Nigeria boundary");
+        panic_with_error!(env, HarvestaError::OutsideNigeriaRegion);
     }
 }
 
@@ -412,7 +413,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "commitment already submitted")]
+    #[should_panic(expected = "Error(Contract, #67)")]
     fn test_duplicate_commitment_rejected() {
         let (env, _, client) = setup();
         let farmer = Address::generate(&env);
@@ -423,7 +424,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "region_geohash is outside the approved Northern Nigeria boundary")]
+    #[should_panic(expected = "Error(Contract, #65)")]
     fn test_out_of_bounds_region_rejected() {
         let (env, _, client) = setup();
         let farmer = Address::generate(&env);
@@ -453,7 +454,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "commitment is not in Pending state")]
+    #[should_panic(expected = "Error(Contract, #69)")]
     fn test_cache_miss_with_different_proof_digest_falls_through() {
         // A different proof_digest for the same commitment is a cache miss
         // and falls through to the pre-existing "not Pending" panic — proving
@@ -501,7 +502,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "commitment is not in Pending state")]
+    #[should_panic(expected = "Error(Contract, #69)")]
     fn test_proof_cache_disabled_when_ttl_zero() {
         // With TTL=0 the cache is bypassed; replay falls through to the
         // pre-existing "not Pending" panic.

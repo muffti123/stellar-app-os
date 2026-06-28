@@ -4,6 +4,8 @@ import { getDistance } from '@/lib/geo/distance';
 import { uploadImageToS3 } from '@/lib/aws/s3';
 import { encryptGpsCoordinates } from '@/lib/zk/locationProof';
 import { sendPhotoUploadedEmail } from '@/lib/email/sendgrid';
+import { getPool } from '@/lib/db/client';
+import { encodeGeohash } from '@/lib/geo/geohash';
 
 // Maximum allowable distance (in meters) between Exif GPS and farmer-submitted GPS.
 const MAX_DISTANCE_METERS = 500;
@@ -18,6 +20,7 @@ export async function POST(request: Request) {
     const treeId = formData.get('treeId') as string | null;
     const sponsorEmail = formData.get('sponsorEmail') as string | null;
     const sponsorName = formData.get('sponsorName') as string | null;
+    const region = (formData.get('region') as string | null) ?? 'unknown';
 
     if (!photo || !latStr || !lonStr || !farmerId) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
@@ -64,6 +67,20 @@ export async function POST(request: Request) {
 
     // Encrypt EXIF GPS coordinates for privacy
     const encryptedGps = await encryptGpsCoordinates({ lat: exifLat, lon: exifLon });
+
+    // Upsert a hashed regional coordinate for the live map (precision-5 ≈ 5km cell).
+    // Exact GPS is never stored.
+    const geohash = encodeGeohash(exifLat, exifLon, 5);
+    await getPool()
+      .query(
+        `INSERT INTO tree_map_points (geohash, region, tree_count)
+         VALUES ($1, $2, 1)
+         ON CONFLICT (geohash) DO UPDATE
+           SET tree_count   = tree_map_points.tree_count + 1,
+               last_updated = NOW()`,
+        [geohash, region]
+      )
+      .catch((err) => console.error('[planting/photo] map upsert error:', err));
 
     // Notify sponsor if contact info provided
     if (sponsorEmail && sponsorName && treeId) {

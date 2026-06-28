@@ -75,6 +75,31 @@ export async function sendTreeVerifiedEmail(params: TreeVerifiedParams): Promise
   });
 }
 
+export interface WaitlistNotificationParams {
+  sponsorEmail: string;
+  sponsorName: string;
+  treeId: string;
+  species: string;
+  region: string;
+  estimatedWaitDays: number;
+  waitlistId: string;
+}
+
+export async function sendWaitlistNotificationEmail(
+  params: WaitlistNotificationParams
+): Promise<void> {
+  if (!isConfigured()) return;
+  const { sponsorEmail, sponsorName, treeId, species, region, estimatedWaitDays, waitlistId } =
+    params;
+  await sgMail.send({
+    to: sponsorEmail,
+    from: FROM,
+    subject: `You're on the waitlist for your ${species} tree 🌿`,
+    text: `Hi ${sponsorName},\n\nNo planters are currently available in ${region} for your ${species} tree (${treeId}). We've added you to our waitlist.\n\nEstimated wait: ~${estimatedWaitDays} day${estimatedWaitDays !== 1 ? 's' : ''}.\n\nYou can check your position any time at: ${process.env.NEXT_PUBLIC_APP_URL ?? 'https://harvesta.app'}/api/planting/waitlist/${waitlistId}\n\nWe'll email you the moment a planter accepts your job.\n\nThanks,\nThe Harvesta Team`,
+    html: `<p>Hi ${sponsorName},</p><p>No planters are currently available in <strong>${region}</strong> for your <strong>${species}</strong> tree (<strong>${treeId}</strong>). We've added you to our waitlist.</p><p>Estimated wait: <strong>~${estimatedWaitDays} day${estimatedWaitDays !== 1 ? 's' : ''}</strong>.</p><p>You can <a href="${process.env.NEXT_PUBLIC_APP_URL ?? 'https://harvesta.app'}/api/planting/waitlist/${waitlistId}">check your waitlist status</a> at any time.</p><p>We'll email you the moment a planter accepts your job.</p><p>Thanks,<br/>The Harvesta Team</p>`,
+  });
+}
+
 export async function sendCarbonMilestoneEmail(params: CarbonMilestoneParams): Promise<void> {
   if (!isConfigured()) return;
   const { sponsorEmail, sponsorName, totalCo2Kg, treeCount } = params;
