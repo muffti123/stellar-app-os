@@ -25,10 +25,10 @@ export function ProjectTimeline({ milestones, className }: ProjectTimelineProps)
         className
       )}
     >
-      {milestones.map((milestone, index) => (
+      {milestones.map((milestone) => (
         <div
-          key={index}
-          className="relative flex items-center justify-between md:justify-normal md:odd:flex-row-reverse group is-active"
+          key={`${milestone.date}-${milestone.title}`}
+          className={`relative flex items-center justify-between md:justify-normal md:odd:flex-row-reverse group ${milestone.status === 'ongoing' ? 'is-active' : ''}`}
         >
           {/* Icon */}
           <div className="flex items-center justify-center w-10 h-10 rounded-full border border-white bg-stellar-navy text-stellar-blue shadow shrink-0 md:order-1 md:group-odd:-translate-x-1/2 md:group-even:translate-x-1/2 z-10">

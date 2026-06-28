@@ -1,27 +1,33 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
-import { mockFarmerDashboard } from '@/lib/api/mock/farmerDashboard';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import type { FarmerDashboardData } from '@/types/farmer-dashboard';
 
-export function useFarmerDashboard(_farmerId?: string) {
+export function useFarmerDashboard(farmerId?: string) {
   const [data, setData] = useState<FarmerDashboardData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [acceptingId, setAcceptingId] = useState<string | null>(null);
+  const dataRef = useRef(data);
+  dataRef.current = data;
 
   const fetchData = useCallback(async () => {
     setIsLoading(true);
     setError(null);
     try {
-      await new Promise((r) => setTimeout(r, 600));
-      setData(mockFarmerDashboard);
+      const query = farmerId ? `?farmerId=${encodeURIComponent(farmerId)}` : '';
+      const res = await fetch(`/api/farmer/dashboard${query}`);
+      if (!res.ok) {
+        throw new Error('Failed to load dashboard');
+      }
+      const dashboardData = (await res.json()) as FarmerDashboardData;
+      setData(dashboardData);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load dashboard');
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [farmerId]);
 
   const acceptJob = useCallback(
     async (assignment: {

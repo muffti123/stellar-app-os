@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import exifr from 'exifr';
 import { getDistance } from '@/lib/geo/distance';
 import { uploadImageToS3 } from '@/lib/aws/s3';
-import { uploadToIpfs } from '@/lib/ipfs/upload';
+import { uploadToIpfs, type IpfsUploadResult } from '@/lib/ipfs/upload';
 import { encryptGpsCoordinates } from '@/lib/zk/locationProof';
 import { sendPhotoUploadedEmail } from '@/lib/email/sendgrid';
 
@@ -25,7 +25,7 @@ export async function POST(request: Request) {
 
     const lat = parseFloat(latStr);
     const lon = parseFloat(lonStr);
-    if (isNaN(lat) || isNaN(lon)) {
+    if (isNaN(lat) || isNaN(lon) || !isFinite(lat) || !isFinite(lon)) {
       return NextResponse.json({ error: 'Invalid coordinates formats' }, { status: 400 });
     }
 
@@ -52,6 +52,9 @@ export async function POST(request: Request) {
       }
     }
 
+    // Encrypt EXIF GPS coordinates for privacy
+    const encryptedGps = await encryptGpsCoordinates({ lat, lon });
+
     // Upload to S3 (private backup)
     let s3Key: string | undefined;
     try {
@@ -61,10 +64,26 @@ export async function POST(request: Request) {
     }
 
     // Upload to IPFS
-    const ipfsResult = await uploadToIpfs(buffer, `${farmerId}-${Date.now()}.jpg`, photo.type);
-
-    // Encrypt EXIF GPS coordinates for privacy
-    const encryptedGps = await encryptGpsCoordinates({ lat, lon });
+    let ipfsResult: IpfsUploadResult;
+    try {
+      ipfsResult = await uploadToIpfs(buffer, `${farmerId}-${Date.now()}.jpg`, photo.type);
+    } catch (err) {
+      console.warn('[planting/photo] IPFS upload failed:', err);
+      if (!s3Key) {
+        return NextResponse.json(
+          { error: 'Failed to upload photo to any storage' },
+          { status: 500 }
+        );
+      }
+      return NextResponse.json(
+        {
+          message: 'Photo uploaded to S3 only (IPFS failed).',
+          s3Key,
+          encryptedGps,
+        },
+        { status: 201 }
+      );
+    }
 
     // Notify sponsor if contact info provided
     if (sponsorEmail && sponsorName && treeId) {

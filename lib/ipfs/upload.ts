@@ -55,6 +55,6 @@ export async function uploadToIpfs(
     cid: result.IpfsHash,
     size: result.PinSize,
     ipfsUrl: `ipfs://${result.IpfsHash}`,
-    gatewayUrl: `${gateway}${result.IpfsHash}`,
+    gatewayUrl: `${gateway}/${result.IpfsHash}`,
   };
 }

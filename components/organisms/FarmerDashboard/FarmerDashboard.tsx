@@ -79,21 +79,24 @@ function MilestoneBadge({ m }: { m: MilestonePayment }) {
 // ── Planting status badge ─────────────────────────────────────────────────────
 
 function PlantingBadge({ status }: { status: PlantingRecord['status'] }) {
-  const map = {
-    verified: { variant: 'success' as const, label: 'Verified' },
-    completed: { variant: 'default' as const, label: 'Completed' },
-    pending: { variant: 'secondary' as const, label: 'Pending' },
-    failed: { variant: 'destructive' as const, label: 'Failed' },
+  const map: Record<
+    string,
+    { variant: 'success' | 'default' | 'secondary' | 'destructive'; label: string }
+  > = {
+    verified: { variant: 'success', label: 'Verified' },
+    completed: { variant: 'default', label: 'Completed' },
+    pending: { variant: 'secondary', label: 'Pending' },
+    failed: { variant: 'destructive', label: 'Failed' },
   };
-  const { variant, label } = map[status];
-  return <Badge variant={variant}>{label}</Badge>;
+  const entry = map[status] ?? { variant: 'secondary' as const, label: status };
+  return <Badge variant={entry.variant}>{entry.label}</Badge>;
 }
 
 // ── Survival rate bar ─────────────────────────────────────────────────────────
 
 function SurvivalBar({ rate }: { rate: number | null }) {
   if (rate === null) return <Text className="text-muted-foreground">Not yet measured</Text>;
-  const color = rate >= 80 ? 'bg-stellar-green' : rate >= 60 ? 'bg-amber-500' : 'bg-destructive';
+  const color = rate >= 80 ? 'bg-stellar-green' : rate >= 60 ? 'bg-amber-500' : 'bg-red-500';
   return (
     <div className="flex items-center gap-2">
       <div className="h-1.5 w-24 rounded-full bg-muted overflow-hidden">

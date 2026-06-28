@@ -19,13 +19,19 @@ export function useTreeStatus(options: UseTreeStatusOptions = {}): UseTreeStatus
   const [error, setError] = useState<Event | null>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
   const onEventRef = useRef(options.onEvent);
-  onEventRef.current = options.onEvent;
+
+  useEffect(() => {
+    onEventRef.current = options.onEvent;
+  });
 
   useEffect(() => {
     const es = new EventSource('/api/trees/status');
     eventSourceRef.current = es;
 
-    es.onopen = () => setIsConnected(true);
+    es.onopen = () => {
+      setIsConnected(true);
+      setError(null);
+    };
 
     es.addEventListener('tree-status', (e: MessageEvent) => {
       try {
@@ -50,5 +56,7 @@ export function useTreeStatus(options: UseTreeStatusOptions = {}): UseTreeStatus
 
   const clearEvents = useCallback(() => setEvents([]), []);
 
-  return { events, isConnected, error, clearEvents } as UseTreeStatusReturn & { clearEvents: () => void };
+  return { events, isConnected, error, clearEvents } as UseTreeStatusReturn & {
+    clearEvents: () => void;
+  };
 }
