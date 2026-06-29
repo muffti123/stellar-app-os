@@ -20,6 +20,7 @@ const TX_TYPE_MAP: Record<string, TreeEventType> = {
   escrow_planting: 'tree:planted',
   escrow_survival: 'tree:survived',
   escrow_refund: 'tree:refunded',
+  escrow_dispute: 'tree:disputed',
 };
 
 export const TREE_TX_TYPES = Object.keys(TX_TYPE_MAP);

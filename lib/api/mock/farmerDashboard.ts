@@ -3,6 +3,7 @@ import type { FarmerDashboardData } from '@/types/farmer-dashboard';
 export const mockFarmerDashboard: FarmerDashboardData = {
   farmerId: 'GFARMER123',
   farmerName: 'Aminu Musa',
+  farmerAddress: 'GA2VU2KP6O6K7PQAVW5S67YHR5FFZ3LK7OV5VSX6JG2FQON4EY4QJJDQ',
   earnings: {
     totalPaidUsdc: 3_150,
     pendingUsdc: 875,

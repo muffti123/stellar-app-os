@@ -1,10 +1,12 @@
 'use client';
 
 import { useFarmerDashboard } from '@/hooks/useFarmerDashboard';
+import { useWalletContext } from '@/contexts/WalletContext';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/molecules/Card';
 import { Badge } from '@/components/atoms/Badge';
 import { Text } from '@/components/atoms/Text';
 import { Skeleton } from '@/components/atoms/Skeleton';
+import { Button } from '@/components/atoms/Button';
 import {
   Coins,
   Clock,
@@ -15,6 +17,10 @@ import {
   Lock,
   AlertCircle,
   ExternalLink,
+  DollarSign,
+  Handshake,
+  Loader2,
+  MapPin,
 } from 'lucide-react';
 import type { MilestonePayment, PlantingRecord, NextAssignment } from '@/types/farmer-dashboard';
 
@@ -71,21 +77,24 @@ function MilestoneBadge({ m }: { m: MilestonePayment }) {
 // ── Planting status badge ─────────────────────────────────────────────────────
 
 function PlantingBadge({ status }: { status: PlantingRecord['status'] }) {
-  const map = {
-    verified: { variant: 'success' as const, label: 'Verified' },
-    completed: { variant: 'default' as const, label: 'Completed' },
-    pending: { variant: 'secondary' as const, label: 'Pending' },
-    failed: { variant: 'destructive' as const, label: 'Failed' },
+  const map: Record<
+    string,
+    { variant: 'success' | 'default' | 'secondary' | 'destructive'; label: string }
+  > = {
+    verified: { variant: 'success', label: 'Verified' },
+    completed: { variant: 'default', label: 'Completed' },
+    pending: { variant: 'secondary', label: 'Pending' },
+    failed: { variant: 'destructive', label: 'Failed' },
   };
-  const { variant, label } = map[status];
-  return <Badge variant={variant}>{label}</Badge>;
+  const entry = map[status] ?? { variant: 'secondary' as const, label: status };
+  return <Badge variant={entry.variant}>{entry.label}</Badge>;
 }
 
 // ── Survival rate bar ─────────────────────────────────────────────────────────
 
 function SurvivalBar({ rate }: { rate: number | null }) {
   if (rate === null) return <Text className="text-muted-foreground">Not yet measured</Text>;
-  const color = rate >= 80 ? 'bg-stellar-green' : rate >= 60 ? 'bg-amber-500' : 'bg-destructive';
+  const color = rate >= 80 ? 'bg-stellar-green' : rate >= 60 ? 'bg-amber-500' : 'bg-red-500';
   return (
     <div className="flex items-center gap-2">
       <div className="h-1.5 w-24 rounded-full bg-muted overflow-hidden">
@@ -131,7 +140,9 @@ function StatCard({
 // ── Main component ────────────────────────────────────────────────────────────
 
 export function FarmerDashboard({ farmerId }: { farmerId?: string }) {
-  const { data, isLoading, error, retry } = useFarmerDashboard(farmerId);
+  const { data, isLoading, error, retry, acceptJob, acceptingId } = useFarmerDashboard(farmerId);
+  const { wallet } = useWalletContext();
+  const walletAddress = wallet?.publicKey ?? data?.farmerAddress;
 
   if (error) {
     return (
@@ -255,12 +266,12 @@ export function FarmerDashboard({ farmerId }: { farmerId?: string }) {
         </CardContent>
       </Card>
 
-      {/* ── Next assignments ── */}
+      {/* ── Available Jobs ── */}
       <Card className="border-none shadow-sm rounded-3xl">
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
             <CalendarDays className="h-4 w-4 text-stellar-blue" />
-            Next Planting Assignments
+            Available Planting Jobs
           </CardTitle>
         </CardHeader>
         <CardContent className="p-0">
@@ -279,27 +290,49 @@ export function FarmerDashboard({ farmerId }: { farmerId?: string }) {
             </div>
           ) : (
             <div className="divide-y">
-              {(data?.nextAssignments ?? []).map((a: NextAssignment) => (
-                <div
-                  key={a.id}
-                  className="px-6 py-4 flex flex-wrap items-center justify-between gap-3"
-                >
-                  <div>
-                    <Text>{a.projectName}</Text>
-                    <Text className="text-muted-foreground">
-                      {a.location} · {fmt(a.treesTarget)} trees · {fmtDate(a.scheduledDate)}
-                    </Text>
+              {(data?.nextAssignments ?? []).map((a: NextAssignment) => {
+                const isAccepting = acceptingId === a.id;
+                return (
+                  <div
+                    key={a.id}
+                    className="px-6 py-5 flex flex-wrap items-start justify-between gap-4"
+                  >
+                    <div className="min-w-0 flex-1 space-y-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Text>{a.projectName}</Text>
+                        <Badge variant={a.status === 'in_progress' ? 'default' : 'secondary'}>
+                          {a.status === 'in_progress' ? 'In Progress' : 'Open'}
+                        </Badge>
+                      </div>
+                      <Text className="text-muted-foreground">
+                        <MapPin className="mr-1 inline h-3 w-3" />
+                        {a.location} · {fmt(a.treesTarget)} trees · {fmtDate(a.scheduledDate)}
+                      </Text>
+                      <div className="flex items-center gap-4 text-sm">
+                        <span className="flex items-center gap-1 text-stellar-green">
+                          <DollarSign className="h-3 w-3" />
+                          Est. {fmtUsdc(a.estimatedEarningUsdc)}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="shrink-0">
+                      <Button
+                        size="sm"
+                        onClick={() => acceptJob?.(a.id)}
+                        disabled={isAccepting || !walletAddress}
+                        className="gap-1.5"
+                      >
+                        {isAccepting ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <Handshake className="h-3.5 w-3.5" />
+                        )}
+                        {isAccepting ? 'Accepting…' : 'Accept Job'}
+                      </Button>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <Badge variant={a.status === 'in_progress' ? 'default' : 'secondary'}>
-                      {a.status === 'in_progress' ? 'In Progress' : 'Upcoming'}
-                    </Badge>
-                    <span className="text-xs font-semibold text-stellar-green">
-                      Est. {fmtUsdc(a.estimatedEarningUsdc)}
-                    </span>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </CardContent>

@@ -18,14 +18,15 @@ function radiusForTrees(trees: number): number {
 }
 
 function colorForStatus(status: TreeStatus): { fill: string; stroke: string } {
-  const colors: Record<TreeStatus, { fill: string; stroke: string }> = {
+  const defaultColor = { fill: '#94a3b8', stroke: '#64748b' };
+  const colors: Record<string, { fill: string; stroke: string } | undefined> = {
     funded: { fill: '#94a3b8', stroke: '#64748b' },
     planted: { fill: '#14B6E7', stroke: '#0ea5e9' },
     verified: { fill: '#00B36B', stroke: '#059669' },
     completed: { fill: '#3E1BDB', stroke: '#4f46e5' },
     failed: { fill: '#ef4444', stroke: '#dc2626' },
   };
-  return colors[status];
+  return colors[status] ?? defaultColor;
 }
 
 function ZoomTracker({ onZoom }: { onZoom: (_zoom: number) => void }) {
@@ -142,10 +143,7 @@ export function ImpactMap({ regions, trees = [] }: ImpactMapProps): JSX.Element 
                     {tree.species} · {tree.region}
                   </p>
                   <p>{tree.co2OffsetKgPerYear} kg CO₂ / year</p>
-                  <Link
-                    href={`/trees/${tree.id}`}
-                    className="text-stellar-green underline"
-                  >
+                  <Link href={`/trees/${tree.id}`} className="text-stellar-green underline">
                     View tree details
                   </Link>
                 </div>

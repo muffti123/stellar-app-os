@@ -129,7 +129,9 @@ export function MilestoneVerificationForm({
           Funds Released!
         </Text>
         <Text variant="muted">
-          <strong className="text-stellar-green">{result.releasedAmountUsdc.toFixed(2)} USDC</strong>{' '}
+          <strong className="text-stellar-green">
+            {result.releasedAmountUsdc.toFixed(2)} USDC
+          </strong>{' '}
           sent to your wallet.
         </Text>
         <a
@@ -151,8 +153,8 @@ export function MilestoneVerificationForm({
           Milestone 1 Verification
         </Text>
         <Text variant="muted" className="text-sm">
-          Submit GPS location and a photo to release{' '}
-          <strong>{releaseAmount} USDC</strong> (75% of escrow).
+          Submit GPS location and a photo to release <strong>{releaseAmount} USDC</strong> (75% of
+          escrow).
         </Text>
       </div>
 
@@ -161,16 +163,14 @@ export function MilestoneVerificationForm({
         <div className="flex items-center gap-2">
           <MapPin className="h-5 w-5 text-stellar-blue" aria-hidden="true" />
           <Text className="font-semibold">GPS Location</Text>
-          {gps && (
-            <CheckCircle className="h-4 w-4 text-stellar-green ml-auto" aria-hidden="true" />
-          )}
+          {gps && <CheckCircle className="h-4 w-4 text-stellar-green ml-auto" aria-hidden="true" />}
         </div>
 
         {gps ? (
           <div className="text-sm text-gray-600 space-y-1">
             <p>Lat: {gps.latitude.toFixed(6)}</p>
             <p>Lng: {gps.longitude.toFixed(6)}</p>
-            {gps.accuracy && <p>Accuracy: ±{Math.round(gps.accuracy)}m</p>}
+            {gps.accuracy != null && <p>Accuracy: ±{Math.round(gps.accuracy)}m</p>}
           </div>
         ) : (
           <Text variant="muted" className="text-sm">
@@ -222,7 +222,22 @@ export function MilestoneVerificationForm({
           ref={fileInputRef}
           type="file"
           accept="image/jpeg,image/png,image/webp"
-          onChange={handlePhotoChange}
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (!file) return;
+            const maxSize = 20 * 1024 * 1024;
+            if (file.size > maxSize) {
+              setErrorMsg('File too large. Maximum size is 20 MB.');
+              e.target.value = '';
+              return;
+            }
+            if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
+              setErrorMsg('Unsupported file type. Use JPEG, PNG, or WebP.');
+              e.target.value = '';
+              return;
+            }
+            handlePhotoChange(e);
+          }}
           className="sr-only"
           id="photo-upload"
           aria-label="Upload field photo"

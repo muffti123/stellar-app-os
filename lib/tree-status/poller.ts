@@ -12,14 +12,16 @@ interface TreeTxRow {
 
 export class TreeStatusPoller {
   private lastTxHash: string | null = null;
+  private lastCreatedAt: string | null = null;
   private pollIntervalMs: number;
 
   constructor(pollIntervalMs = 3000) {
     this.pollIntervalMs = pollIntervalMs;
   }
 
-  setLastTxHash(hash: string | null) {
+  setLastTxHash(hash: string | null, createdAt?: string | null) {
     this.lastTxHash = hash;
+    this.lastCreatedAt = createdAt ?? null;
   }
 
   async poll(): Promise<TreeStatusEvent[]> {
@@ -30,12 +32,13 @@ export class TreeStatusPoller {
     let sql: string;
     const params: unknown[] = [];
 
-    if (this.lastTxHash) {
+    if (this.lastTxHash && this.lastCreatedAt) {
       sql = `SELECT tx_hash, created_at, tx_type, amount, source_account, destination
              FROM indexed_transactions
-             WHERE tx_type IN (${placeholders}) AND tx_hash > $${values.length + 1}
+             WHERE tx_type IN (${placeholders})
+               AND (created_at, tx_hash) > ($${values.length + 1}, $${values.length + 2})
              ORDER BY created_at ASC, tx_hash ASC`;
-      params.push(...values, this.lastTxHash);
+      params.push(...values, this.lastCreatedAt, this.lastTxHash);
     } else {
       sql = `SELECT tx_hash, created_at, tx_type, amount, source_account, destination
              FROM indexed_transactions
@@ -50,7 +53,9 @@ export class TreeStatusPoller {
 
     if (rows.length === 0) return [];
 
-    this.lastTxHash = rows[rows.length - 1].tx_hash;
+    const lastRow = rows[rows.length - 1];
+    this.lastTxHash = lastRow.tx_hash;
+    this.lastCreatedAt = lastRow.created_at;
 
     const events: TreeStatusEvent[] = [];
 

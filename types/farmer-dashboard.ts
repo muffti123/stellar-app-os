@@ -44,6 +44,7 @@ export interface FarmerEarnings {
 export interface FarmerDashboardData {
   farmerId: string;
   farmerName: string;
+  farmerAddress?: string;
   earnings: FarmerEarnings;
   plantingHistory: PlantingRecord[];
   nextAssignments: NextAssignment[];

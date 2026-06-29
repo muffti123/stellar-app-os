@@ -239,7 +239,8 @@ export function ProjectLocationMap({
       satelliteLayerRef.current = null;
       activeLayerRef.current = null;
     };
-  }, [lat, lng, locationLabel, projectName, viewMode]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lat, lng, locationLabel, projectName]);
 
   useEffect(() => {
     const map = mapInstanceRef.current;
